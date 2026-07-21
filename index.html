@@ -281,6 +281,27 @@
     padding:10px 26px; border-radius:30px; opacity:0; transition:opacity .3s; z-index:60; pointer-events:none;
   }
 
+  /* 成就解锁弹卡 */
+  #achToasts { position:fixed; right:16px; bottom:16px; z-index:130; display:flex; flex-direction:column; gap:10px; pointer-events:none; }
+  .achPop { background:linear-gradient(135deg,#2a2417,#1a160e); border:1px solid #ffd27f; border-radius:12px;
+    padding:10px 16px; display:flex; align-items:center; gap:10px; box-shadow:0 4px 18px rgba(0,0,0,.55);
+    animation:achIn .45s ease; max-width:300px; }
+  .achPop .ai2 { font-size:30px; }
+  .achPop .an { color:#ffd27f; font-weight:700; font-size:14px; }
+  .achPop .aq { color:#8fa0b3; font-size:11px; }
+  @keyframes achIn { from { transform:translateX(120%); opacity:0; } to { transform:none; opacity:1; } }
+  /* 成就墙 */
+  #achBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+    background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
+  #achBox.show { opacity:1; pointer-events:auto; }
+  #achPanel { background:#131c28; border:1px solid rgba(255,210,127,.4); border-radius:16px; padding:20px 22px; width:min(620px,94vw); max-height:86vh; overflow:auto; }
+  #achGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin-top:12px; }
+  .achCell { background:rgba(255,255,255,.05); border-radius:10px; padding:10px; text-align:center; }
+  .achCell.lock { opacity:.38; filter:grayscale(.9); }
+  .achCell .ai2 { font-size:26px; }
+  .achCell .an { font-size:13px; font-weight:700; color:#f0d9a8; margin:4px 0 2px; }
+  .achCell .ac { font-size:11px; color:#8fa0b3; }
+
   /* ================= 手机适配 ================= */
   @media (max-width: 720px) {
     body { padding:6px; }
@@ -462,6 +483,7 @@
     </div>
     <button id="btnStart">开 始 战 斗</button>
     <div id="recLine"></div>
+    <button class="ghost" id="btnAch" style="margin-top:8px">🏆 成就墙 <span id="achCount"></span></button>
   </div></div>
 
   <div id="overlay"><div id="overBox">
@@ -515,6 +537,15 @@
     ・难度：简单=乱打 ｜ 普通=标准 ｜ 困难=记牌+精准护盾+零误伤<br>
     <br><button onclick="document.getElementById('rules').classList.remove('show')">关闭</button>
   </div></div>
+
+  <div id="achToasts"></div>
+  <div id="achBox" onclick="if(event.target===this)this.classList.remove('show')">
+    <div id="achPanel">
+      <h3 style="margin:0;color:#f0d9a8">🏆 成就墙 <span id="achCount2" style="font-size:13px;color:#8fa0b3"></span></h3>
+      <div id="achGrid"></div>
+      <br><button onclick="$('achBox').classList.remove('show')">关闭</button>
+    </div>
+  </div>
 
   <div id="shareBox" onclick="if(event.target===this)this.classList.remove('show')">
     <div id="shareCardWrap">
@@ -669,7 +700,14 @@ function initGame() {
     swapSrc:null,                      // 移型换位：第一选的士兵格索引
     rareOpen:null, rareSel:[],
     playedCards:[],   // 困难 AI 记牌用：玩家打出/弃掉的牌
-    stats:{ kills:{player:0, ai:0}, items:{player:0, ai:0}, rares:{player:0, ai:0}, rounds:0, start:Date.now() },
+    stats:{ kills:{player:0, ai:0}, items:{player:0, ai:0}, rares:{player:0, ai:0}, rounds:0, start:Date.now(),
+            shieldBlocks:{player:0, ai:0},   // 成就统计：护盾抵挡次数
+            turnKills:0,                     // 成就统计：本回合玩家击杀数
+            sacUsed:false,                   // 成就统计：本局用过身先士卒
+            swapVictim:null,                 // 成就统计：移型换位换来的敌兵所在格
+            minMe:CONFIG.soldiers,           // 成就统计：本局己方最低兵力
+          },
+    newAch:[],   // 本局解锁的成就（分享卡展示用）
   };
   // 士兵（按配置数量）
   const slots = shuffle([...Array(36).keys()]);
@@ -964,6 +1002,8 @@ function guidedOpenBox(idx){
     const key = cell.rareItem;
     cell.rareItem = null; cell.rareTarget = null; cell.crater = true;
     S.stats.rares.player++;
+    unlockAch('first_rare');
+    if (S.stats.rares.player >= 3) unlockAch('rare3');
     sfx('pickup');
     log('me', `🎯 精准制导直接解锁了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
     const summoned = applyRareItem('player', key);
@@ -974,6 +1014,7 @@ function guidedOpenBox(idx){
   } else if (cell.item) {
     const k = pickNoDup('player', cell.item); cell.item = null; cell.crater = true;
     S.items.player.push(k); S.stats.items.player++;
+    unlockAch('first_item');
     sfx('pickup');
     floatText(idx, ITEMS[k].icon);
     log('me', `🎯 精准制导远程开启了 (${cell.r+1},${cell.c+1}) 的补给箱：【${ITEMS[k].icon}${ITEMS[k].name}】`);
@@ -1004,6 +1045,8 @@ function tryOpenRare(){
   S.rareOpen = null; S.rareSel = [];
   S.played++;   // 开箱消耗 1 次出牌次数，之后可继续出牌
   S.stats.rares.player++;
+  unlockAch('first_rare');
+  if (S.stats.rares.player >= 3) unlockAch('rare3');
   sfx('pickup');
   log('me', `✨ 你用点数和 ${sum} 开启了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】（消耗 1 次出牌）`);
   const summoned = applyRareItem('player', key);
@@ -1083,7 +1126,9 @@ async function playCard(side, cardIdx, targetIdx){
       if (rr>=0&&rr<6&&cc>=0&&cc<6) targets.push(rr*6+cc);
     });
   }
+  const killsBefore = S.stats.kills[side];
   for (const ti of targets) resolveHit(side, ti);
+  if (chain && side==='player' && S.stats.kills.player - killsBefore >= 2) unlockAch('chain_multi');   // 成就：连环雷一炮多杀
 
   S.played++;
   S.busy = false; render();
@@ -1119,9 +1164,18 @@ function resolveHit(attacker, idx){
       cell.shield = false;
       sfx('shield');
       log('sys', `🛡 ${pos} 的护盾挡下了炮击！`);
+      S.stats.shieldBlocks[enemy]++;   // 成就统计：护盾挡炮
+      if (enemy==='player' && S.stats.shieldBlocks.player >= 3) unlockAch('shield3');
     } else {
       cell.soldier = null; cell.crater = true;
       S.stats.kills[attacker]++;
+      if (enemy==='player') S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));   // 成就统计：最低兵力
+      if (attacker==='player') {
+        if (S.stats.kills.player === 1) unlockAch('first_kill');
+        S.stats.turnKills++;
+        if (S.stats.turnKills >= 2) unlockAch('dbl_kill');
+        if (S.stats.swapVictim === idx) { unlockAch('swap_kill'); S.stats.swapVictim = null; }   // 换位换来的敌兵当回合被炸死
+      }
       sfx('explosion');
       shakeMap();
       _pendingCellFx.push({ idx, txt:'💥', death:enemy });
@@ -1134,10 +1188,15 @@ function resolveHit(attacker, idx){
     shakeMap();
     _pendingCellFx.push({ idx, txt:'💥', death:attacker });
     log('sys', `😱 ${pos} 连环雷误杀！${SIDE_NAME[attacker]}一名己方士兵被自己人炸死`);
+    if (attacker==='player') {
+      unlockAch('friendly');   // 成就：痛击队友（负面成就也是笑点）
+      S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));
+    }
   } else if (cell.item && !cell.crater) {
     const k = pickNoDup(attacker, cell.item); cell.item = null; cell.crater = true;
     S.items[attacker].push(k);
     S.stats.items[attacker]++;
+    if (attacker==='player') unlockAch('first_item');
     sfx('pickup');
     _pendingCellFx.push({ idx, txt:ITEMS[k].icon });
     log(attacker==='player'?'me':'ai', `🎁 ${SIDE_NAME[attacker]}在 ${pos} 拾取道具【${ITEMS[k].icon}${ITEMS[k].name}】`);
@@ -1224,6 +1283,7 @@ function applySwap(a, b, itemIdx){
   if (cb.soldier) {   // 交换敌我两名士兵位置（护盾跟随士兵）
     [ca.soldier, cb.soldier] = [cb.soldier, ca.soldier];
     [ca.shield,  cb.shield]  = [cb.shield,  ca.shield];
+    S.stats.swapVictim = a;   // 成就统计：被换到我方阵地的敌兵位置，当回合炸死解锁「乾坤大挪移」
     log('me', `🌀 移型换位！你的士兵与 (${cb.r+1},${cb.c+1}) 的敌方士兵交换了位置`);
   } else {            // 移动士兵到空地（原地变回空地，护盾跟随）
     const who = ca.soldier==='player' ? '你的' : '敌方';
@@ -1276,6 +1336,8 @@ function onItemClick(i){
         el.onclick = () => {
           cell.soldier = null; cell.shield = false; cell.crater = true;
           S.items.player.splice(i,1); S.selItem = null;
+          S.stats.sacUsed = true;   // 成就统计：身先士卒已用
+          S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));
           const drew = [1+rand(6), 1+rand(6)];
           S.hand.player.push(...drew);
           S.needPlay++;   // 卖血换节奏：本回合多一次出牌
@@ -1430,6 +1492,8 @@ function startTurn(side, first=false){
   if (side==='player') {
     S.revealAi = false;   // 侦察效果持续一个对方回合后消失
     S.discarded = false;  // 每回合重置弃牌次数
+    S.stats.turnKills = 0;        // 成就统计：回合击杀计数清零
+    S.stats.swapVictim = null;    // 成就统计：换位敌兵标记只保留一回合
     S.rareOpen = null; S.rareSel = [];
     exitDiscardMode();
     if (!first) { log('sys','—— 轮到你了 ——'); sfx('turn'); }
@@ -1782,6 +1846,7 @@ function showEndOverlay(p, a, kind, isLocal=true){
   }
   const win = title.includes('赢');
   recordResult(win, draw);
+  checkGameEndAch(win, draw);   // 成就：结算时统一判定
   // 生成战绩分享卡所需的数据
   LAST_END = {
     icon, title, p, a,
@@ -1789,6 +1854,7 @@ function showEndOverlay(p, a, kind, isLocal=true){
     rounds: S.stats.rounds,
     mmss: `${Math.floor(Math.max(1,Math.floor((Date.now()-S.stats.start)/1000))/60)}分${String(Math.max(1,Math.floor((Date.now()-S.stats.start)/1000))%60).padStart(2,'0')}秒`,
     mode: NET.on ? '联机对战' : '人机 · ' + DIFF_NAMES[difficulty],
+    achs: (S.newAch||[]).map(d=>d.name),   // 本局解锁的成就
   };
   sfx(win ? 'win' : 'lose');
   $('overIcon').textContent = icon;
@@ -2168,6 +2234,11 @@ function drawShareCard(d){
   x.fillStyle = '#8fa0b3'; x.font = `13px ${F}`;
   x.fillText('—— 战场骚话生成器', W/2, 556+98);
 
+  // 本局解锁成就（有则显示）
+  if (d.achs && d.achs.length) {
+    x.fillStyle = '#ffd27f'; x.font = `bold 16px ${F}`;
+    x.fillText(`🏆 本局解锁成就：${d.achs.slice(0,3).join('、')}${d.achs.length>3 ? ` 等 ${d.achs.length} 项` : ''}`, W/2, 694);
+  }
   // 模式
   x.fillStyle = '#8fa0b3'; x.font = `15px ${F}`;
   x.fillText(`模式：${d.mode}`, W/2, 712);
@@ -2186,6 +2257,87 @@ function showShareCard(){
   $('shareImg').src = url;
   $('shareDl').href = url;
   $('shareBox').classList.add('show');
+}
+
+/* ================= 成就系统 ================= */
+const ACHIEVEMENTS = [
+  { id:'first_game',   icon:'🎖', name:'新兵报到',   cond:'完成第 1 局游戏',                 quote:'欢迎入伍，炮弹不长眼' },
+  { id:'first_kill',   icon:'🎯', name:'首开纪录',   cond:'首次击杀 1 名士兵',               quote:'第一滴血，手感来了' },
+  { id:'first_item',   icon:'📦', name:'开箱达人',   cond:'首次拾取道具',                    quote:'白捡的就是香' },
+  { id:'first_rare',   icon:'✨', name:'壕气冲天',   cond:'首次开启稀有宝箱',                quote:'精准的心，颤抖的手' },
+  { id:'first_net',    icon:'🤝', name:'网友见面',   cond:'完成第 1 局联机对战',             quote:'友谊第一，比赛第二（假的）' },
+  { id:'dbl_kill',     icon:'💥', name:'一炮双响',   cond:'单回合击杀 2 名士兵',             quote:'炮弹批发，概不赊账' },
+  { id:'chain_multi',  icon:'🔗', name:'连环杀手',   cond:'连环雷一次炸死 2 名以上士兵',     quote:'数学家看了都点头' },
+  { id:'sac_win',      icon:'🗡', name:'壮士断腕',   cond:'使用身先士卒后获胜',              quote:'兵的命也是命……但胜利更重要' },
+  { id:'swap_kill',    icon:'🌀', name:'乾坤大挪移', cond:'移型换位换来敌兵后，当回合炸死它', quote:'送你上路，不用谢' },
+  { id:'friendly',     icon:'😱', name:'痛击队友',   cond:'连环雷误杀己方士兵',              quote:'这一炮，友军沉默了' },
+  { id:'comeback',     icon:'🩸', name:'丝血翻盘',   cond:'只剩 1 兵时反杀获胜',             quote:'血压拉满，建议回放十遍' },
+  { id:'shield3',      icon:'🛡', name:'刀枪不入',   cond:'单局用护盾抵挡 3 次炮击',         quote:'对面炮弹质检不合格' },
+  { id:'blitz',        icon:'⚡', name:'闪电战',     cond:'5 回合内获胜',                    quote:'对面还没反应过来就结束了' },
+  { id:'rare3',        icon:'🧠', name:'精打细算',   cond:'一局内开启 3 个稀有宝箱',         quote:'别人打仗靠炮，你靠脑子' },
+  { id:'win50',        icon:'👑', name:'常胜将军',   cond:'累计 50 胜',                      quote:'战功赫赫，建议授衔' },
+  { id:'streak5',      icon:'🔥', name:'五连绝世',   cond:'联机 5 连胜',                     quote:'建议朋友们联合起来抵制你' },
+];
+function getAch(){ try { return JSON.parse(localStorage.getItem('spw_ach')||'{}'); } catch(e){ return {}; } }
+function saveAch(a){ try { localStorage.setItem('spw_ach', JSON.stringify(a)); } catch(e){} }
+function unlockAch(id){
+  const a = getAch();
+  if (a[id]) return;
+  a[id] = Date.now(); saveAch(a);
+  const def = ACHIEVEMENTS.find(x=>x.id===id);
+  if (!def) return;
+  if (S && S.newAch) S.newAch.push(def);   // 记录本局解锁，分享卡用
+  achPop(def);
+  refreshAchCount();
+}
+function achPop(def){
+  const box = $('achToasts');
+  const el = document.createElement('div');
+  el.className = 'achPop';
+  el.innerHTML = `<div class="ai2">${def.icon}</div><div><div class="an">🏆 成就解锁：${def.name}</div><div class="aq">${def.quote}</div></div>`;
+  box.appendChild(el);
+  sfx('win');   // 借用胜利音效做解锁提示
+  setTimeout(()=>{ el.style.transition='opacity .5s'; el.style.opacity=0; setTimeout(()=>el.remove(), 500); }, 3200);
+  while (box.children.length > 3) box.firstChild.remove();   // 最多同屏 3 张
+}
+function refreshAchCount(){
+  const n = Object.keys(getAch()).length;
+  const t = `${n}/${ACHIEVEMENTS.length}`;
+  if ($('achCount'))  $('achCount').textContent = t;
+  if ($('achCount2')) $('achCount2').textContent = `已解锁 ${t}`;
+}
+function showAchWall(){
+  const a = getAch();
+  $('achGrid').innerHTML = ACHIEVEMENTS.map(d => {
+    const un = !!a[d.id];
+    return `<div class="achCell${un?'':' lock'}">
+      <div class="ai2">${un ? d.icon : '❓'}</div>
+      <div class="an">${d.name}</div>
+      <div class="ac">${un ? d.quote : d.cond}</div>
+    </div>`;
+  }).join('');
+  refreshAchCount();
+  $('achBox').classList.add('show');
+}
+$('btnAch').onclick = showAchWall;
+/* 结算时统一判定的成就 */
+function checkGameEndAch(win, draw){
+  unlockAch('first_game');
+  if (NET.on) unlockAch('first_net');
+  // 联机连胜
+  if (NET.on) {
+    let st = +(localStorage.getItem('spw_net_streak')||0);
+    st = win ? st+1 : 0;
+    localStorage.setItem('spw_net_streak', st);
+    if (st >= 5) unlockAch('streak5');
+  }
+  if (win) {
+    if (S.stats.minMe === 1) unlockAch('comeback');
+    if (S.stats.rounds <= 5) unlockAch('blitz');
+    if (S.stats.sacUsed) unlockAch('sac_win');
+    const r = getRec();
+    if ((r.wins||0) >= 50) unlockAch('win50');
+  }
 }
 
 /* ================= 本地战绩 ================= */

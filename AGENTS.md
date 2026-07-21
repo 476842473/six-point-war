@@ -34,6 +34,7 @@ AGENTS.md    # 本文件
 - 道具池：scout/chain/ammo/guided/shield/reinforce/desperate(变废为宝)/sacrifice(身先士卒,+1出牌)/swap(移型换位,护盾跟随士兵)
 - **道具去重**：入手瞬间 pickNoDup() 检查，已持有同类则转换为未持有种类（9 种全持有才允许重复）
 - **联机先后手**：CONFIG.firstMove = random(默认)/alternate(轮换,localStorage spw_first_last)/host(主机先手)；主机 initGame 决定 iFirst，后手方开局 1 兵带盾；主机后手时 S.turn='ai'+busy 锁定并 netSync 等对方先动
+- **成就系统**：16 个成就（ACHIEVEMENTS 表），unlockAch(id) 判重+弹卡+记入 S.newAch；统计字段在 S.stats（shieldBlocks/turnKills/sacUsed/swapVictim/minMe）；结算类由 checkGameEndAch 统一判定；存储 localStorage spw_ach，联机连胜 spw_net_streak；成就纯本地判定不走网络同步
 - 稀有道具：shieldSummon/doubleSummon/drawBonus(之后3回合+1抽)
 - 无空地时按剩余兵力结算；后手 1 兵开局带盾
 
