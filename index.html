@@ -192,7 +192,7 @@
   #netTools { display:flex; gap:10px; justify-content:center; margin-bottom:8px; }
   #netTools button { font-size:12px; padding:5px 14px; }
   /* 联机：客人只读查看主机配置 */
-  .guestView .cfgStep button, .guestView #cfgDiff button, .guestView #cfgMode button,
+  .guestView .cfgStep button, .guestView #cfgDiff button, .guestView #cfgFirst button, .guestView #cfgMode button,
   .guestView #cfgNetRole button, .guestView #btnNetGo, .guestView #roomCodeInput { pointer-events:none; opacity:.35; }
   /* 骰子点数面 */
   .die .pips { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; width:28px; }
@@ -452,6 +452,14 @@
       <div class="cfgStep"><button data-k="plays" data-d="-1">−</button><b id="vPlays">2</b><button data-k="plays" data-d="1">＋</button></div>
       <span class="cfgRange">1 ~ 4</span>
     </div>
+    <div class="cfgRow" id="firstRow" style="display:none">
+      <span class="cfgLabel">🎲 先后手</span>
+      <div class="cfgSeg" id="cfgFirst">
+        <button data-v="random" class="on">随机</button>
+        <button data-v="alternate">轮换</button>
+        <button data-v="host">主机先手</button>
+      </div>
+    </div>
     <button id="btnStart">开 始 战 斗</button>
     <div id="recLine"></div>
   </div></div>
@@ -540,6 +548,12 @@ const ITEMS = {
   swap:      { icon:'🌀', name:'移型换位', desc:'移动一名士兵到空地，或交换敌我两名士兵位置' },
 };
 const ITEM_KEYS = Object.keys(ITEMS);
+/* 道具去重：已持有同类道具时，转换为未持有的种类（全种类都持有则允许重复） */
+function pickNoDup(side, k){
+  if (!S.items[side].includes(k)) return k;
+  const pool = ITEM_KEYS.filter(x => !S.items[side].includes(x));
+  return pool.length ? pool[rand(pool.length)] : k;
+}
 const RARE_ITEMS = {
   shieldSummon: { icon:'🛡', name:'精锐援军', desc:'随机空地召唤 1 名带护盾的士兵' },
   doubleSummon: { icon:'👥', name:'双子空降', desc:'两块随机空地各召唤 1 名士兵' },
@@ -568,7 +582,7 @@ function pipsHtml(v){
 // 难度
 let difficulty = 'normal';
 // 开局配置
-const CONFIG = { difficulty:'normal', soldiers:5, boxes:7, plays:2 };
+const CONFIG = { difficulty:'normal', soldiers:5, boxes:7, plays:2, firstMove:'random' };
 const CFG_RANGE = { soldiers:[3,8], boxes:[0,12], plays:[1,4] };
 const CFG_LABEL = { soldiers:'vSoldiers', boxes:'vBoxes', plays:'vPlays' };
 const SOLDIER = { player:'🪖', ai:'🤖' };
@@ -628,6 +642,13 @@ $('btnBgm').onclick = () => {
 /* ================= 初始化 ================= */
 function initGame() {
   difficulty = CONFIG.difficulty;   // 以配置界面的难度为准
+  // 联机先后手：主机决定（随机 / 轮换 / 主机先手），单机和客人固定本地先手视角
+  let iFirst = true;
+  if (NET.on && NET.isHost) {
+    if (CONFIG.firstMove === 'random') iFirst = Math.random() < 0.5;
+    else if (CONFIG.firstMove === 'alternate') iFirst = localStorage.getItem('spw_first_last') !== 'me';
+    localStorage.setItem('spw_first_last', iFirst ? 'me' : 'opp');
+  }
   // 格子：1-6 各 6 个
   const values = shuffle(VALUES.flatMap(v => Array(6).fill(v)));
   S = {
@@ -655,9 +676,10 @@ function initGame() {
   const NS = CONFIG.soldiers;
   for (let i=0;i<NS;i++)      S.cells[slots[i]].soldier='player';
   for (let i=NS;i<NS*2;i++)   S.cells[slots[i]].soldier='ai';
-  // 后手补偿：电脑随机 1 名士兵开局自带护盾
-  const aiStart = S.cells.filter(c=>c.soldier==='ai');
-  aiStart[rand(aiStart.length)].shield = true;
+  // 后手补偿：后手方随机 1 名士兵开局自带护盾
+  const secondSide = iFirst ? 'ai' : 'player';
+  const secondStart = S.cells.filter(c=>c.soldier===secondSide);
+  secondStart[rand(secondStart.length)].shield = true;
   // 补给箱（按配置数量，开局也有 25% 概率是稀有箱）
   for (let i=NS*2;i<NS*2+CONFIG.boxes;i++) {
     const cell = S.cells[slots[i]];
@@ -674,11 +696,18 @@ function initGame() {
   document.querySelectorAll('.diff').forEach(x=>x.classList.toggle('active', x.dataset.d===difficulty));
   LOGS.length = 0; FXQ.length = 0; $('log').innerHTML='';
   bgmPlay();
-  log('sys','⚔️ 战斗开始！你先手，回合开始先掷骰摸牌。');
+  log('sys', iFirst ? '⚔️ 战斗开始！你先手，回合开始先掷骰摸牌。'
+                    : `⚔️ 战斗开始！${SIDE_NAME.ai}先手，请等待${SIDE_NAME.ai}行动。`);
   const rareCount = S.cells.filter(c=>c.rareItem).length;
   if (rareCount) log('sys', `✨ 本局开局刷出 ${rareCount} 个稀有道具箱，快去抢开！`);
-  log('sys', `🛡 后手补偿：${SIDE_NAME.ai}一名士兵开局自带护盾（可抵挡一次炮击）`);
-  beginPlayerTurn(true);
+  log('sys', `🛡 后手补偿：${secondSide==='player' ? '你的' : SIDE_NAME.ai + '的'}一名士兵开局自带护盾（可抵挡一次炮击）`);
+  if (iFirst) {
+    beginPlayerTurn(true);
+  } else {
+    // 联机后手：锁定操作，把初始状态发给对方，等对方先行动
+    S.turn = 'ai'; S.busy = true;
+    netSync();
+  }
   render();
 }
 
@@ -943,7 +972,7 @@ function guidedOpenBox(idx){
     netSync();
     checkOver();
   } else if (cell.item) {
-    const k = cell.item; cell.item = null; cell.crater = true;
+    const k = pickNoDup('player', cell.item); cell.item = null; cell.crater = true;
     S.items.player.push(k); S.stats.items.player++;
     sfx('pickup');
     floatText(idx, ITEMS[k].icon);
@@ -1106,7 +1135,7 @@ function resolveHit(attacker, idx){
     _pendingCellFx.push({ idx, txt:'💥', death:attacker });
     log('sys', `😱 ${pos} 连环雷误杀！${SIDE_NAME[attacker]}一名己方士兵被自己人炸死`);
   } else if (cell.item && !cell.crater) {
-    const k = cell.item; cell.item = null; cell.crater = true;
+    const k = pickNoDup(attacker, cell.item); cell.item = null; cell.crater = true;
     S.items[attacker].push(k);
     S.stats.items[attacker]++;
     sfx('pickup');
@@ -1889,6 +1918,7 @@ function onNetData(d){
     Object.assign(CONFIG, d.cfg);
     Object.keys(CFG_LABEL).forEach(k => $(CFG_LABEL[k]).textContent = CONFIG[k]);
     document.querySelectorAll('#cfgDiff button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.difficulty));
+    document.querySelectorAll('#cfgFirst button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.firstMove));
     return;
   }
   if (d.t !== 'state' || !d.S) return;
@@ -2262,6 +2292,14 @@ document.querySelectorAll('#cfgDiff button').forEach(b=>{
     sendCfg();
   };
 });
+document.querySelectorAll('#cfgFirst button').forEach(b=>{
+  b.onclick = () => {
+    if ($('setupBox').classList.contains('guestView')) return;   // 客人只读
+    CONFIG.firstMove = b.dataset.v;
+    document.querySelectorAll('#cfgFirst button').forEach(x=>x.classList.toggle('on', x===b));
+    sendCfg();
+  };
+});
 document.querySelectorAll('.cfgStep button').forEach(b=>{
   b.onclick = () => {
     if ($('setupBox').classList.contains('guestView')) return;   // 客人只读
@@ -2279,6 +2317,7 @@ document.querySelectorAll('#cfgMode button').forEach(b=>{
     document.querySelectorAll('#cfgMode button').forEach(x=>x.classList.toggle('on', x===b));
     $('netLobby').style.display = netMode==='net' ? '' : 'none';
     $('diffRow').style.display  = netMode==='net' ? 'none' : '';
+    $('firstRow').style.display = netMode==='net' ? '' : 'none';   // 先后手设置仅联机有效
     if (netMode==='ai') leaveOnline();
   };
 });
@@ -2318,6 +2357,7 @@ $('btnStart').onclick = () => {
 function showSetup(){
   if (NET.on) leaveOnline();
   document.querySelectorAll('#cfgDiff button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.difficulty));
+  document.querySelectorAll('#cfgFirst button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.firstMove));
   Object.keys(CFG_LABEL).forEach(k => $(CFG_LABEL[k]).textContent = CONFIG[k]);
   $('recLine').textContent = recText();
   $('overlay').classList.remove('show');

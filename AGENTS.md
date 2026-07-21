@@ -32,6 +32,8 @@ AGENTS.md    # 本文件
 - 稀有箱：2 张牌点数和精确等于目标(7~12)；**出过牌不可开箱；开箱耗 1 次出牌**；精准制导可免牌直开任意箱
 - 出牌次数用完且手里有道具时，不自动结束回合（等手动）；此时卡牌类道具(制导/连环)不可用，弹药补给可用
 - 道具池：scout/chain/ammo/guided/shield/reinforce/desperate(变废为宝)/sacrifice(身先士卒,+1出牌)/swap(移型换位,护盾跟随士兵)
+- **道具去重**：入手瞬间 pickNoDup() 检查，已持有同类则转换为未持有种类（9 种全持有才允许重复）
+- **联机先后手**：CONFIG.firstMove = random(默认)/alternate(轮换,localStorage spw_first_last)/host(主机先手)；主机 initGame 决定 iFirst，后手方开局 1 兵带盾；主机后手时 S.turn='ai'+busy 锁定并 netSync 等对方先动
 - 稀有道具：shieldSummon/doubleSummon/drawBonus(之后3回合+1抽)
 - 无空地时按剩余兵力结算；后手 1 兵开局带盾
 
