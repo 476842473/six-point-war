@@ -311,9 +311,7 @@
   #triplePanel h3 { margin:0 0 4px; color:#f0d9a8; }
   #triplePanel .sub3 { color:#8fa0b3; font-size:12px; margin-bottom:14px; }
   #tripleBtns { display:flex; gap:10px; justify-content:center; }
-  #tripleBtns button { width:46px; height:58px; font-size:22px; font-weight:700; border-radius:8px;
-    background:linear-gradient(160deg,#fdf3dc,#e8d5ae); color:#3a2f14; border:1px solid #b89b5e; cursor:pointer; }
-  #tripleBtns button:hover { transform:translateY(-3px); box-shadow:0 4px 10px rgba(0,0,0,.4); }
+  #tripleBtns .card { width:64px; height:90px; }   /* 与手牌同款样式，略缩小 */
 
   /* ================= 手机适配 ================= */
   @media (max-width: 720px) {
@@ -556,14 +554,7 @@
     <div id="triplePanel">
       <h3>🎰 三连兑换</h3>
       <div class="sub3">弃掉 3 张相同点数的牌，兑换 1 张任意点数的牌</div>
-      <div id="tripleBtns">
-        <button onclick="doTripleExchange(1)">1</button>
-        <button onclick="doTripleExchange(2)">2</button>
-        <button onclick="doTripleExchange(3)">3</button>
-        <button onclick="doTripleExchange(4)">4</button>
-        <button onclick="doTripleExchange(5)">5</button>
-        <button onclick="doTripleExchange(6)">6</button>
-      </div>
+      <div id="tripleBtns"></div>
     </div>
   </div>
 
@@ -979,6 +970,17 @@ function doDiscard(){
   netSync();   // 联机：同步弃牌结果
 }
 /* ---------- 三连兑换：弃 3 张相同点数，换 1 张任意点数（消耗本回合弃牌机会） ---------- */
+// 点数选择器：渲染成与手牌同款的卡牌
+$('tripleBtns').innerHTML = [1,2,3,4,5,6].map(v => {
+  const vc = VCOLORS[v-1];
+  return `<div class="card" onclick="doTripleExchange(${v})">
+    <div class="cband" style="background:linear-gradient(90deg,${vc},${vc}cc)"></div>
+    <div class="corner tl" style="color:${vc}">${v}</div>
+    ${pipsHtml(v)}
+    <div class="corner br" style="color:${vc}">${v}</div>
+    <div class="suit" style="color:${vc}">${VNAMES[v-1]}</div>
+  </div>`;
+}).join('');
 function doTripleExchange(v){
   if (!S.discardMode || S.discardSel.length !== 3) return;
   const vals = S.discardSel.map(i=>S.hand.player[i]);
