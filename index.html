@@ -295,7 +295,7 @@
     background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
   #achBox.show { opacity:1; pointer-events:auto; }
   #achPanel { background:#131c28; border:1px solid rgba(255,210,127,.4); border-radius:16px; padding:20px 22px; width:min(620px,94vw); max-height:86vh; overflow:auto; }
-  #achGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin-top:12px; }
+  #achGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px; }
   .achCell { background:rgba(255,255,255,.05); border-radius:10px; padding:10px; text-align:center; }
   .achCell.lock { opacity:.38; filter:grayscale(.9); }
   .achCell .ai2 { font-size:26px; }
@@ -307,6 +307,7 @@
     body { padding:6px; }
     h1 { font-size:15px; letter-spacing:.2em; margin:0; }
     .sub { display:none; }
+    #achGrid { grid-template-columns:repeat(2,1fr); }   /* 小屏成就墙改 2 列防挤压 */
     #aiHand { min-height:26px; margin-bottom:0; gap:4px; }
     #aiHand .mini { width:22px; height:26px; font-size:10px; border-radius:5px; }
     #aiItemBar { min-height:16px; font-size:10px; margin-bottom:0; }
