@@ -303,6 +303,18 @@
   .achCell .an { font-size:13px; font-weight:700; color:#f0d9a8; margin:4px 0 2px; }
   .achCell .ac { font-size:11px; color:#8fa0b3; }
 
+  /* 三连兑换点数选择器 */
+  #tripleBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+    background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
+  #tripleBox.show { opacity:1; pointer-events:auto; }
+  #triplePanel { background:#131c28; border:1px solid rgba(255,210,127,.4); border-radius:16px; padding:22px 26px; text-align:center; }
+  #triplePanel h3 { margin:0 0 4px; color:#f0d9a8; }
+  #triplePanel .sub3 { color:#8fa0b3; font-size:12px; margin-bottom:14px; }
+  #tripleBtns { display:flex; gap:10px; justify-content:center; }
+  #tripleBtns button { width:46px; height:58px; font-size:22px; font-weight:700; border-radius:8px;
+    background:linear-gradient(160deg,#fdf3dc,#e8d5ae); color:#3a2f14; border:1px solid #b89b5e; cursor:pointer; }
+  #tripleBtns button:hover { transform:translateY(-3px); box-shadow:0 4px 10px rgba(0,0,0,.4); }
+
   /* ================= 手机适配 ================= */
   @media (max-width: 720px) {
     body { padding:6px; }
@@ -532,13 +544,28 @@
 
     <b>⚙️ 其他规则</b><br>
     ・<b>不能炮击自己的士兵</b>；但连环雷溅射会误伤己方，用前看清范围（悬停可预览）<br>
-    ・弃牌换牌：每回合 1 次，弃 2 张抽 1 张（重抽必与弃牌点数不同）<br>
+    ・弃牌换牌：每回合 1 次，弃 2 张抽 1 张（重抽必与弃牌点数不同）；选 3 张相同点数的牌可触发三连兑换，换 1 张任意点数的牌<br>
     ・<b>无空地结算</b>：地图被占满（无可用空地）时，立即按剩余士兵数定胜负，相等为平局<br>
     ・结束回合：可随时提前结束，轮到电脑<br>
     ・后手补偿：电脑开局 1 名士兵自带护盾<br>
     ・难度：简单=乱打 ｜ 普通=标准 ｜ 困难=记牌+精准护盾+零误伤<br>
     <br><button onclick="document.getElementById('rules').classList.remove('show')">关闭</button>
   </div></div>
+
+  <div id="tripleBox" onclick="if(event.target===this)this.classList.remove('show')">
+    <div id="triplePanel">
+      <h3>🎰 三连兑换</h3>
+      <div class="sub3">弃掉 3 张相同点数的牌，兑换 1 张任意点数的牌</div>
+      <div id="tripleBtns">
+        <button onclick="doTripleExchange(1)">1</button>
+        <button onclick="doTripleExchange(2)">2</button>
+        <button onclick="doTripleExchange(3)">3</button>
+        <button onclick="doTripleExchange(4)">4</button>
+        <button onclick="doTripleExchange(5)">5</button>
+        <button onclick="doTripleExchange(6)">6</button>
+      </div>
+    </div>
+  </div>
 
   <div id="achToasts"></div>
   <div id="achBox" onclick="if(event.target===this)this.classList.remove('show')">
@@ -906,12 +933,25 @@ function onCardClick(i){
     return;
   }
   if (S.discardMode) {
-    const lim = S.forcedDiscard > 0 ? S.forcedDiscard : 2;
+    const lim = S.forcedDiscard > 0 ? S.forcedDiscard : 3;   // 普通弃牌最多选 3 张（三连兑换）
     const p = S.discardSel.indexOf(i);
     if (p >= 0) S.discardSel.splice(p,1);
     else if (S.discardSel.length < lim) { S.discardSel.push(i); sfx('card'); }
     render();
-    if (S.discardSel.length === lim) setTimeout(S.forcedDiscard > 0 ? doForcedDiscard : doDiscard, 300);
+    if (S.forcedDiscard > 0) {
+      if (S.discardSel.length === lim) setTimeout(doForcedDiscard, 300);
+      return;
+    }
+    if (S.discardSel.length === 2) {
+      const [a,b] = S.discardSel;
+      if (S.hand.player[a] !== S.hand.player[b]) setTimeout(doDiscard, 300);   // 点数不同：走普通弃 2 抽 1
+      else toast('🎰 点数相同！再选 1 张同点牌可触发三连兑换（取消一张则普通弃牌）');
+    }
+    if (S.discardSel.length === 3) {
+      const vals = S.discardSel.map(x=>S.hand.player[x]);
+      if (vals[0]===vals[1] && vals[1]===vals[2]) $('tripleBox').classList.add('show');   // 三连兑换：弹出点数选择器
+      else { S.discardSel.pop(); render(); toast('🚫 三连兑换需要 3 张相同点数的牌'); }
+    }
     return;
   }
   S.selItem = null; S.swapSrc = null;
@@ -937,6 +977,24 @@ function doDiscard(){
   toast('🗑 弃牌成功，重抽 1 张');
   render();
   netSync();   // 联机：同步弃牌结果
+}
+/* ---------- 三连兑换：弃 3 张相同点数，换 1 张任意点数（消耗本回合弃牌机会） ---------- */
+function doTripleExchange(v){
+  if (!S.discardMode || S.discardSel.length !== 3) return;
+  const vals = S.discardSel.map(i=>S.hand.player[i]);
+  if (!(vals[0]===vals[1] && vals[1]===vals[2])) return;   // 防御：必须 3 张相同
+  const idxs = S.discardSel.slice().sort((a,b)=>b-a);
+  idxs.forEach(i=>S.hand.player.splice(i,1));
+  S.playedCards.push(...vals);   // 记牌：弃掉的牌同样被困难 AI 记住
+  S.hand.player.push(v);
+  S.discarded = true;
+  $('tripleBox').classList.remove('show');
+  exitDiscardMode();
+  sfx('card');
+  log('me', `🎰 三连兑换！你弃掉 3 张 ${vals[0]} 点牌，兑换了 1 张 ${v} 点牌`);
+  toast(`🎰 三连兑换成功：获得 ${v} 点牌`);
+  render();
+  netSync();   // 联机：同步兑换结果
 }
 function exitDiscardMode(){
   S.discardMode = false; S.discardSel = [];
@@ -2531,7 +2589,12 @@ $('btnDiscard').onclick = () => {
   S.rareOpen = null; S.rareSel = [];
   $('btnDiscard').textContent = '取消弃牌';
   $('btnDiscard').classList.add('discarding');
-  toast('🗑 点击 2 张要弃掉的牌，自动重抽 1 张');
+  // 手里有 3 张同点牌时提示可三连兑换
+  const cnt = {};
+  S.hand.player.forEach(v => cnt[v]=(cnt[v]||0)+1);
+  const tri = Object.keys(cnt).find(v => cnt[v]>=3);
+  toast(tri ? `🗑 点 2 张弃牌重抽；你有 3 张 ${tri} 点牌，全选可触发三连兑换！`
+            : '🗑 点击 2 张要弃掉的牌，自动重抽 1 张');
   render();
 };
 $('btnEndTurn').onclick = async () => {
