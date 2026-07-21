@@ -1,0 +1,2365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>六点战场 · 双人卡牌炮击战</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
+  body {
+    font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+    background:radial-gradient(1200px 700px at 50% -10%, #2b3a4e, #16202c 70%);
+    min-height:100vh; color:#e8edf2; display:flex; flex-direction:column; align-items:center;
+    padding:14px;
+  }
+  h1 { font-size:22px; letter-spacing:.3em; margin:4px 0 2px; color:#f0d9a8; text-shadow:0 2px 8px rgba(0,0,0,.5); }
+  .sub { font-size:12px; color:#8fa0b3; letter-spacing:.15em; margin-bottom:10px; }
+
+  #layout { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+
+  /* ---------- 地图 ---------- */
+  #mapWrap { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:14px; padding:14px; }
+  #map {
+    display:grid; grid-template-columns:repeat(6, 76px); grid-template-rows:repeat(6, 76px);
+    gap:6px;
+  }
+  .cell {
+    position:relative; border-radius:10px; cursor:default;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .12s, box-shadow .12s, outline .12s;
+    box-shadow:inset 0 -3px 0 rgba(0,0,0,.18);
+  }
+  .cell .val { position:absolute; top:3px; left:6px; font-size:12px; font-weight:700; opacity:.75; color:rgba(255,255,255,.9); }
+  .cell.v1 { background:linear-gradient(145deg,#7a8ba0,#66778c); }
+  .cell.v2 { background:linear-gradient(145deg,#6f9a8a,#5d8577); }
+  .cell.v3 { background:linear-gradient(145deg,#a08a5f,#8a774f); }
+  .cell.v4 { background:linear-gradient(145deg,#8a6f9a,#755f85); }
+  .cell.v5 { background:linear-gradient(145deg,#9a6f6f,#855d5d); }
+  .cell.v6 { background:linear-gradient(145deg,#5f7fa0,#4f6d8a); }
+  .cell.targetable { cursor:crosshair; outline:3px solid #ffd75e; outline-offset:-3px; animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 18px rgba(255,215,94,.7); } }
+  .cell:hover.targetable { transform:scale(1.06); }
+  .cell.crater { filter:grayscale(.7) brightness(.6); }
+  .cell.rarebox { outline:3px solid #ffd75e; outline-offset:-3px; box-shadow:0 0 16px rgba(255,215,94,.55); animation:pulse 1.4s infinite; }
+  .cell.rarebox.canopen { cursor:pointer; }
+  .rareTag { position:absolute; top:2px; right:4px; font-size:10px; background:#ffd75e; color:#5a4a10; border-radius:4px; padding:0 4px; font-weight:800; }
+  /* 士兵召唤特效 */
+  .cell.spawned { animation:spawnIn 1.1s ease-out; z-index:6; }
+  @keyframes spawnIn {
+    0%   { box-shadow:0 0 0 0 rgba(255,215,94,.95); transform:scale(.55); filter:brightness(2.2); }
+    45%  { box-shadow:0 0 26px 12px rgba(255,215,94,.75); transform:scale(1.18); filter:brightness(1.6); }
+    100% { box-shadow:0 0 0 0 rgba(255,215,94,0); transform:scale(1); filter:none; }
+  }
+  .dicePanel.goldFlash { animation:goldFlash 1.4s ease-out; }
+  @keyframes goldFlash {
+    0%   { box-shadow:0 0 0 0 rgba(255,215,94,.9); }
+    50%  { box-shadow:0 0 22px 8px rgba(255,215,94,.6); }
+    100% { box-shadow:0 0 0 0 rgba(255,215,94,0); }
+  }
+  .cell.crater::after { content:'💥'; position:absolute; font-size:20px; opacity:.5; }
+  .soldier { font-size:34px; filter:drop-shadow(0 3px 3px rgba(0,0,0,.4)); }
+  .badge { position:absolute; bottom:2px; right:3px; font-size:15px; }
+  .itembox { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:32px; filter:drop-shadow(0 3px 3px rgba(0,0,0,.4)); }
+  .cell.boom { animation:boom .5s; }
+  @keyframes boom { 0%{transform:scale(1)} 30%{transform:scale(1.25) rotate(4deg); filter:brightness(2)} 100%{transform:scale(1)} }
+  .flyDmg {
+    position:absolute; left:50%; top:30%; transform:translate(-50%,-50%);
+    font-size:30px; pointer-events:none; animation:flyUp 1s forwards; z-index:5;
+  }
+  @keyframes flyUp { to { transform:translate(-50%,-160%); opacity:0; } }
+
+  /* ---------- 侧栏 ---------- */
+  #side { width:270px; display:flex; flex-direction:column; gap:10px; }
+  .panel { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:12px; }
+  #turnBanner { text-align:center; font-size:15px; font-weight:700; letter-spacing:.08em; }
+  #turnBanner.mine { color:#7fd4ff; } #turnBanner.theirs { color:#ff9a8a; }
+
+  #diceRow { display:flex; gap:12px; justify-content:center; padding:6px 0 2px; }
+  #diceSide { text-align:center; font-size:12px; letter-spacing:.1em; color:#8fa0b3; padding-top:2px; }
+  #diceSide.mine { color:#7fd4ff; } #diceSide.theirs { color:#ff9a8a; }
+  .die {
+    width:46px; height:46px; border-radius:10px; background:linear-gradient(145deg,#fff,#dfe6ee);
+    color:#22303f; font-size:24px; font-weight:800; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 8px rgba(0,0,0,.35);
+  }
+  .die.rolling { animation:shake .12s infinite; }
+  @keyframes shake { 25%{transform:translate(2px,-2px) rotate(6deg)} 75%{transform:translate(-2px,2px) rotate(-6deg)} }
+
+  #scoreRow { display:flex; justify-content:space-around; font-size:13px; }
+  .army { text-align:center; }
+  .army .n { font-size:22px; font-weight:800; }
+  .army.p .n { color:#7fd4ff; } .army.a .n { color:#ff9a8a; }
+
+  #log { height:190px; overflow-y:auto; font-size:12px; line-height:1.7; display:flex; flex-direction:column; }
+  #log div { padding:1px 4px; border-radius:4px; }
+  #log .me { color:#9fdcff; } #log .ai { color:#ffb3a6; } #log .sys { color:#c9b37e; }
+  #log::-webkit-scrollbar { width:5px; } #log::-webkit-scrollbar-thumb { background:#445; border-radius:3px; }
+
+  /* ---------- 手牌区 ---------- */
+  #handWrap { width:100%; max-width:860px; margin-top:14px; display:flex; flex-direction:column; gap:10px; }
+  .handLabel { font-size:13px; color:#8fa0b3; letter-spacing:.1em; display:flex; justify-content:space-between; }
+  #itemBar { display:flex; gap:8px; min-height:54px; flex-wrap:wrap; }
+  .itemCard {
+    width:88px; padding:6px 4px; border-radius:10px; text-align:center; cursor:pointer;
+    background:linear-gradient(145deg,#3d4f63,#2c3b4c); border:1px solid #4d6076;
+    transition:transform .12s, box-shadow .12s; font-size:11px;
+  }
+  .itemCard:hover { transform:translateY(-4px); box-shadow:0 6px 14px rgba(0,0,0,.4); }
+  .itemCard .ic { font-size:22px; }
+  .itemCard.selected { outline:3px solid #ffd75e; }
+  #hand { display:flex; gap:10px; justify-content:center; min-height:104px; }
+  .card {
+    width:80px; height:112px; border-radius:12px; cursor:pointer; position:relative; overflow:hidden;
+    background:linear-gradient(160deg,#fbf6e9,#efe4c9); color:#2b3646;
+    border:1px solid #d9cca6;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    box-shadow:0 5px 12px rgba(0,0,0,.4), inset 0 0 0 3px rgba(255,255,255,.45);
+    transition:transform .12s, box-shadow .12s;
+    font-weight:800;
+  }
+  .card .cband { position:absolute; top:0; left:0; right:0; height:9px; }
+  .card .corner { position:absolute; font-size:15px; font-weight:800; line-height:1; }
+  .card .corner.tl { top:14px; left:8px; }
+  .card .corner.br { bottom:8px; right:8px; transform:rotate(180deg); }
+  .card .suit { position:absolute; bottom:8px; left:8px; font-size:11px; opacity:.55; letter-spacing:1px; }
+  .card .pips { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; width:46px; }
+  .card .dot { width:10px; height:10px; border-radius:50%; margin:auto; }
+  .card .dot.off { visibility:hidden; }
+  .card:hover { transform:translateY(-8px) rotate(-1deg); }
+  .card.selected { transform:translateY(-12px); outline:3px solid #ffd75e; box-shadow:0 10px 22px rgba(255,215,94,.35); }
+  .card.discard-sel { transform:translateY(-12px); outline:3px solid #ff7b6b; box-shadow:0 10px 22px rgba(255,123,107,.35); }
+  .card .num { font-size:38px; }
+  /* 难度选择 */
+  #diffGroup { display:flex; gap:0; border-radius:9px; overflow:hidden; border:1px solid rgba(255,255,255,.2); }
+  .diff { border-radius:0 !important; padding:9px 14px !important; font-size:12px !important; }
+  .diff.active { background:linear-gradient(145deg,#c9a55c,#a8823f) !important; color:#241c0c !important; }
+  .diffLabel { align-self:center; font-size:12px; color:#8fa0b3; letter-spacing:.1em; }
+  .card.back { background:linear-gradient(160deg,#5a3040,#40222e); cursor:default; }
+  .card.back .num { color:#c9a0ae; font-size:26px; }
+  #aiHand { display:flex; gap:6px; justify-content:center; min-height:44px; margin-bottom:6px; }
+  #aiHand .mini {
+    width:34px; height:46px; border-radius:6px; background:linear-gradient(160deg,#5a3040,#40222e);
+    display:flex; align-items:center; justify-content:center; font-weight:800; color:#f0d9a8; font-size:16px;
+  }
+  #aiHand .mini.open { background:linear-gradient(160deg,#f5efe0,#e4d9c0); color:#2b3646; }
+  #aiItemBar { display:flex; gap:5px; justify-content:center; min-height:26px; font-size:13px; color:#ffb3a6; margin-bottom:8px; }
+
+  #controls { display:flex; gap:10px; justify-content:center; margin-top:12px; }
+  button {
+    background:linear-gradient(145deg,#c9a55c,#a8823f); color:#241c0c; border:none; border-radius:9px;
+    padding:9px 22px; font-size:14px; font-weight:700; letter-spacing:.1em; cursor:pointer;
+    box-shadow:0 4px 10px rgba(0,0,0,.35); transition:transform .1s;
+  }
+  button:hover { transform:translateY(-2px); }
+  button.ghost { background:rgba(255,255,255,.1); color:#cfd9e3; border:1px solid rgba(255,255,255,.2); }
+
+  /* ---------- 开局配置界面 ---------- */
+  #setup {
+    position:fixed; inset:0; z-index:55; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(1200px 700px at 50% -10%, #2b3a4e, #16202c 70%);
+  }
+  #setup.hide { display:none; }
+  #setupBox {
+    text-align:center; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    border-radius:20px; padding:34px 46px; min-width:400px;
+  }
+  #setupBox h2 { color:#f0d9a8; letter-spacing:.35em; margin-bottom:4px; font-size:26px; }
+  .setupSub { font-size:12px; color:#8fa0b3; letter-spacing:.15em; margin-bottom:26px; }
+  .cfgRow { display:flex; align-items:center; margin-bottom:15px; }
+  .cfgLabel { font-size:14px; width:118px; text-align:left; }
+  .cfgSeg { display:flex; border-radius:9px; overflow:hidden; border:1px solid rgba(255,255,255,.2); }
+  .cfgSeg button { background:rgba(255,255,255,.06); color:#cfd9e3; border:none; padding:8px 18px; cursor:pointer; font-size:13px; box-shadow:none; }
+  .cfgSeg button.on { background:linear-gradient(145deg,#c9a55c,#a8823f); color:#241c0c; font-weight:700; }
+  .cfgStep { display:flex; align-items:center; gap:14px; }
+  .cfgStep button {
+    width:32px; height:32px; border-radius:8px; padding:0; font-size:17px;
+    background:rgba(255,255,255,.1); color:#cfd9e3; border:1px solid rgba(255,255,255,.2); box-shadow:none;
+  }
+  .cfgStep b { font-size:19px; width:26px; text-align:center; color:#f0d9a8; }
+  .cfgRange { font-size:11px; color:#5c6b7c; margin-left:auto; }
+  #btnStart { margin-top:16px; font-size:16px; padding:12px 52px; letter-spacing:.25em; }
+  /* 联机大厅 */
+  #netLobby { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:14px 16px 12px; margin-bottom:16px; }
+  #netStatus { font-size:12px; color:#8fa0b3; text-align:center; min-height:20px; margin-bottom:8px; letter-spacing:.05em; }
+  #netStatus.ok { color:#8fe3a8; } #netStatus.warn { color:#ffb3a6; }
+  #roomCodeInput {
+    flex:1; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); border-radius:9px;
+    color:#f0d9a8; font-size:16px; letter-spacing:.3em; text-align:center; padding:8px; outline:none;
+    text-transform:uppercase; font-weight:700;
+  }
+  #btnNetGo { font-size:13px; padding:8px 24px; }
+  #netTools { display:flex; gap:10px; justify-content:center; margin-bottom:8px; }
+  #netTools button { font-size:12px; padding:5px 14px; }
+  /* 联机：客人只读查看主机配置 */
+  .guestView .cfgStep button, .guestView #cfgDiff button, .guestView #cfgMode button,
+  .guestView #cfgNetRole button, .guestView #btnNetGo, .guestView #roomCodeInput { pointer-events:none; opacity:.35; }
+  /* 骰子点数面 */
+  .die .pips { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; width:28px; }
+  .die .dot { width:8px; height:8px; border-radius:50%; margin:auto; }
+  .die .dot.off { visibility:hidden; }
+  /* 连环雷轰炸范围预览 */
+  .cell.chainZone { box-shadow: inset 0 0 0 2px #ff7b3d, 0 0 12px rgba(255,123,61,.55); z-index:2; }
+
+  /* 联机回合倒计时条 */
+  #turnTimer { height:6px; background:rgba(255,255,255,.08); border-radius:4px; overflow:hidden; margin-bottom:6px; }
+  #turnTimerFill { height:100%; width:100%; background:#7fd4ff; transition:width .25s linear; }
+
+  /* 快捷表情 */
+  #emoteBar { display:flex; gap:8px; justify-content:center; padding:2px 0 4px; flex-wrap:wrap; }
+  #emoteBar button { font-size:22px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:4px 12px; cursor:pointer; }
+  #emoteBar button:hover { background:rgba(255,255,255,.14); }
+  #emotePop { position:fixed; left:50%; top:34%; transform:translate(-50%,-50%); z-index:80; text-align:center; pointer-events:none; opacity:0; }
+  #emotePop.pop { animation:emotePop 2.2s ease-out; }
+  @keyframes emotePop { 0%{opacity:0; transform:translate(-50%,-30%) scale(.5)} 15%{opacity:1; transform:translate(-50%,-50%) scale(1.15)} 30%{transform:translate(-50%,-50%) scale(1)} 80%{opacity:1} 100%{opacity:0; transform:translate(-50%,-75%) scale(1)} }
+  #emotePop .eBig { font-size:64px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
+  #emotePop .eTxt { font-size:15px; background:rgba(0,0,0,.55); border-radius:8px; padding:3px 12px; margin-top:6px; display:inline-block; }
+
+  /* 打击感：震屏 / 炮弹 / 士兵倒下 */
+  @keyframes shakeMap { 0%,100%{transform:translate(0,0)} 20%{transform:translate(-5px,3px)} 40%{transform:translate(5px,-3px)} 60%{transform:translate(-4px,-2px)} 80%{transform:translate(4px,2px)} }
+  #mapWrap.shake { animation:shakeMap .3s; }
+  .flyShell { position:fixed; width:14px; height:14px; border-radius:50%; z-index:60; pointer-events:none;
+    background:radial-gradient(circle,#ffd27f,#ff7b3d); box-shadow:0 0 12px 4px rgba(255,150,60,.7);
+    transition:transform .28s ease-in, opacity .3s; }
+  .dieFall { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5;
+    font-size:34px; pointer-events:none; animation:dieFallA .7s ease-in forwards; }
+  @keyframes dieFallA { 35%{opacity:1; transform:rotate(0)} 100%{ transform:rotate(85deg) translateY(14px); opacity:0; } }
+
+  /* 新手引导 */
+  .guideHi { box-shadow:0 0 0 3px #ffd27f, 0 0 18px 4px rgba(255,210,127,.5) !important; border-radius:10px; position:relative; z-index:85; }
+  #guidePop { position:fixed; z-index:90; background:#1c2634; border:1px solid #ffd27f; border-radius:12px;
+    padding:12px 14px; font-size:14px; line-height:1.6; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  #guidePop .guideBtns { display:flex; gap:10px; justify-content:flex-end; margin-top:10px; }
+  #guidePop button { font-size:13px; padding:6px 16px; }
+
+  /* 设置界面历史战绩 */
+  #recLine { margin-top:14px; font-size:12px; color:#8fa0b3; min-height:16px; letter-spacing:.03em; text-align:center; }
+
+  /* 战绩分享卡弹窗 */
+  #shareBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.78); opacity:0; pointer-events:none; transition:.25s; padding:16px; }
+  #shareBox.show { opacity:1; pointer-events:auto; }
+  #shareCardWrap { max-width:min(92vw,400px); text-align:center; }
+  #shareImg { width:100%; border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.6); }
+  .shareBtns { display:flex; gap:12px; justify-content:center; margin-top:14px; }
+  .shareBtns a { display:inline-block; background:linear-gradient(135deg,#3f9ff8,#2f7dd4); color:#fff; border-radius:10px;
+    padding:10px 20px; font-size:14px; text-decoration:none; cursor:pointer; }
+  .shareTip { margin-top:10px; font-size:12px; color:#8fa0b3; }
+
+  /* ---------- 结算遮罩 ---------- */
+  #overlay {
+    position:fixed; inset:0; background:rgba(10,15,22,.82); display:none;
+    align-items:center; justify-content:center; z-index:50; backdrop-filter:blur(4px);
+  }
+  #overlay.show { display:flex; }
+  #overBox { text-align:center; background:#1f2c3b; border:1px solid #3d5064; border-radius:18px; padding:36px 48px; min-width:340px; }
+  #overBox .big { font-size:44px; margin-bottom:6px; }
+  #overBox .res { font-size:26px; font-weight:800; letter-spacing:.2em; margin-bottom:6px; }
+  #overBox .sub2 { font-size:13px; color:#8fa0b3; margin-bottom:18px; letter-spacing:.08em; }
+  .statTb { width:100%; border-collapse:collapse; margin:0 0 14px; font-size:14px; }
+  .statTb th, .statTb td { padding:6px 14px; text-align:center; }
+  .statTb th { color:#c9b37e; font-size:13px; }
+  .statTb td:first-child, .statTb th:first-child { text-align:left; color:#8fa0b3; }
+  .statTb tr { border-bottom:1px solid rgba(255,255,255,.08); }
+  .statTb .win { color:#8fe3a8; font-weight:800; }
+  .overMeta { font-size:12px; color:#8fa0b3; letter-spacing:.08em; margin-bottom:20px; }
+
+  /* ---------- 规则弹层 ---------- */
+  #rules {
+    position:fixed; inset:0; background:rgba(10,15,22,.75); display:none;
+    align-items:center; justify-content:center; z-index:40;
+  }
+  #rules.show { display:flex; }
+  #rulesBox { background:#1f2c3b; border-radius:16px; padding:26px 30px; max-width:520px; font-size:13px; line-height:2; max-height:80vh; overflow:auto; }
+  #rulesBox h3 { color:#f0d9a8; margin-bottom:8px; }
+  #rulesBox table { width:100%; border-collapse:collapse; font-size:12px; }
+  #rulesBox td { padding:3px 6px; border-bottom:1px solid rgba(255,255,255,.08); }
+
+  #toast {
+    position:fixed; top:18px; left:50%; transform:translateX(-50%);
+    background:rgba(240,217,168,.95); color:#3a2f14; font-weight:700; font-size:14px;
+    padding:10px 26px; border-radius:30px; opacity:0; transition:opacity .3s; z-index:60; pointer-events:none;
+  }
+
+  /* ================= 手机适配 ================= */
+  @media (max-width: 720px) {
+    body { padding:6px; }
+    h1 { font-size:15px; letter-spacing:.2em; margin:0; }
+    .sub { display:none; }
+    #aiHand { min-height:26px; margin-bottom:0; gap:4px; }
+    #aiHand .mini { width:22px; height:26px; font-size:10px; border-radius:5px; }
+    #aiItemBar { min-height:16px; font-size:10px; margin-bottom:0; }
+
+    /* 状态条在上，地图在下 */
+    #layout { flex-direction:column; width:100%; gap:6px; }
+    #side { width:100%; order:-1; flex-direction:row; flex-wrap:wrap; gap:6px; }
+    #side .panel { padding:6px 8px; border-radius:10px; }
+    #turnBanner { flex:1 1 100%; font-size:13px; }
+    .dicePanel { flex:1; }
+    #scoreRow { flex:1.3; align-items:center; }
+    .army .n { font-size:16px; }
+    .army { font-size:10px; }
+    .die { width:28px; height:28px; font-size:14px; border-radius:7px; }
+    #diceSide { font-size:10px; }
+    #diceRow { padding:0; gap:6px; }
+    .logPanel { flex:1 1 100%; }
+    #log { height:48px; font-size:11px; }
+
+    /* 地图自适应屏宽 */
+    #mapWrap { width:100%; padding:6px; border-radius:10px; }
+    #map { grid-template-columns:repeat(6,1fr); grid-template-rows:none; gap:4px; }
+    .cell { width:auto; aspect-ratio:1; border-radius:6px; }
+    .cell .val { font-size:10px; top:2px; left:4px; }
+    .soldier { font-size:22px; }
+    .badge { font-size:11px; bottom:1px; right:2px; }
+    .itembox { font-size:20px; }
+    .die .pips { width:18px; gap:2px; }
+    .die .dot { width:5px; height:5px; }
+    .rareTag { font-size:8px; padding:0 3px; }
+    .flyDmg { font-size:22px; }
+
+    /* 手牌紧跟地图下方，同屏操作 */
+    #handWrap { margin-top:6px; padding:4px 2px; gap:6px; }
+    .card { width:56px; height:78px; border-radius:9px; }
+    .card .corner { font-size:11px; }
+    .card .corner.tl { top:10px; left:6px; }
+    .card .corner.br { bottom:4px; right:6px; }
+    .card .pips { width:30px; gap:3px; }
+    .card .dot { width:7px; height:7px; }
+    .card .suit { font-size:9px; bottom:4px; left:6px; }
+    #itemBar { min-height:30px; gap:6px; }
+    #itemBar > span { padding:2px !important; }
+    .itemCard { width:68px; font-size:10px; padding:3px 2px; }
+    .itemCard .ic { font-size:15px; }
+    #hand { gap:6px; min-height:80px; }
+    #actionBar button { padding:4px 10px; font-size:11px; }
+    .handLabel { font-size:10px; }
+
+    #controls { flex-wrap:wrap; gap:6px; }
+    #setupBox, #overBox { min-width:0; width:92vw; padding:24px 20px; }
+    .statTb th, .statTb td { padding:5px 8px; font-size:13px; }
+    #rulesBox { max-width:92vw; padding:18px; }
+  }
+</style>
+</head>
+<body>
+  <h1>六 点 战 场</h1>
+  <div class="sub">骰子定手牌 · 卡牌点格子 · 炮决定胜负</div>
+
+  <div id="aiHand"></div>
+  <div id="aiItemBar"></div>
+
+  <div id="layout">
+    <div id="mapWrap"><div id="map"></div></div>
+    <div id="side">
+      <div class="panel" id="turnBanner">—</div>
+      <div id="turnTimer" style="display:none"><div id="turnTimerFill"></div></div>
+      <div class="panel dicePanel">
+        <div id="diceSide">🎲 等待掷骰</div>
+        <div id="diceRow"><div class="die" id="d1">?</div><div class="die" id="d2">?</div></div>
+      </div>
+      <div class="panel" id="scoreRow">
+        <div class="army p"><div class="n" id="pCount">5</div><div>🪖 你的士兵</div></div>
+        <div class="army a"><div class="n" id="aCount">5</div><div id="aArmyLabel">🤖 电脑士兵</div></div>
+      </div>
+      <div class="panel logPanel"><div id="log"></div></div>
+    </div>
+  </div>
+
+  <div id="handWrap">
+    <div id="actionBar">
+      <button class="ghost" id="btnDiscard">🗑 弃牌换牌</button>
+      <button id="btnEndTurn">结束回合 ➜</button>
+      <button class="ghost" id="btnEmote" style="display:none" title="快捷表情">😀</button>
+      <button class="ghost" id="btnBgm" title="背景音乐">🎵</button>
+      <button class="ghost" id="btnSound">🔊</button>
+    </div>
+    <div id="emoteBar" style="display:none">
+      <button data-e="👍" data-t="漂亮！">👍</button>
+      <button data-e="😅" data-t="失误了…">😅</button>
+      <button data-e="🔥" data-t="急了急了">🔥</button>
+      <button data-e="🎲" data-t="运气不错">🎲</button>
+      <button data-e="🤝" data-t="承让承让">🤝</button>
+      <button data-e="🏳" data-t="投降" title="投降认输">🏳</button>
+    </div>
+    <div class="handLabel"><span>🎁 道具（点击使用，不占出牌数）</span><span id="hint"></span></div>
+    <div id="itemBar"></div>
+    <div class="handLabel"><span>🂠 你的手牌（开局 3 张，回合开始掷骰摸牌，回合结束需 ≤5 张）</span><span id="playState"></span></div>
+    <div id="hand"></div>
+  </div>
+
+  <div id="controls">
+    <span class="diffLabel">难度</span>
+    <div id="diffGroup">
+      <button class="ghost diff" data-d="easy">简单</button>
+      <button class="ghost diff" data-d="normal">普通</button>
+      <button class="ghost diff" data-d="hard">困难</button>
+    </div>
+    <button class="ghost" id="btnRules">📜 玩法说明</button>
+    <button id="btnRestart">↻ 新开一局</button>
+  </div>
+
+  <div id="setup"><div id="setupBox">
+    <h2>六 点 战 场</h2>
+    <div class="setupSub">骰子定手牌 · 卡牌点格子 · 炮决定胜负</div>
+    <div class="cfgRow">
+      <span class="cfgLabel">🎮 对战模式</span>
+      <div class="cfgSeg" id="cfgMode">
+        <button data-v="ai" class="on">🤖 人机对战</button>
+        <button data-v="net">🌐 联机对战</button>
+      </div>
+    </div>
+    <!-- 联机大厅 -->
+    <div id="netLobby" style="display:none">
+      <div class="cfgRow">
+        <span class="cfgLabel">🌐 联机方式</span>
+        <div class="cfgSeg" id="cfgNetRole">
+          <button data-v="host" class="on">创建房间</button>
+          <button data-v="guest">加入房间</button>
+        </div>
+      </div>
+      <div class="cfgRow" id="roomCodeRow" style="display:none">
+        <span class="cfgLabel">🔑 房间码</span>
+        <input id="roomCodeInput" placeholder="输入 4 位房间码" maxlength="4">
+      </div>
+      <div id="netStatus">创建房间后，把房间码发给好友</div>
+      <div id="netTools">
+        <button class="ghost" id="btnNetRetry" style="display:none">🔄 重试</button>
+        <button class="ghost" id="btnCopyCode" style="display:none">📋 复制房间码</button>
+      </div>
+      <button class="ghost" id="btnNetGo">🌐 创建房间</button>
+    </div>
+    <div class="cfgRow" id="diffRow">
+      <span class="cfgLabel">⚔️ 难度</span>
+      <div class="cfgSeg" id="cfgDiff">
+        <button data-v="easy">简单</button>
+        <button data-v="normal" class="on">普通</button>
+        <button data-v="hard">困难</button>
+      </div>
+    </div>
+    <div class="cfgRow">
+      <span class="cfgLabel">🪖 士兵数量</span>
+      <div class="cfgStep"><button data-k="soldiers" data-d="-1">−</button><b id="vSoldiers">5</b><button data-k="soldiers" data-d="1">＋</button></div>
+      <span class="cfgRange">3 ~ 8</span>
+    </div>
+    <div class="cfgRow">
+      <span class="cfgLabel">📦 开局道具箱</span>
+      <div class="cfgStep"><button data-k="boxes" data-d="-1">−</button><b id="vBoxes">7</b><button data-k="boxes" data-d="1">＋</button></div>
+      <span class="cfgRange">0 ~ 12</span>
+    </div>
+    <div class="cfgRow">
+      <span class="cfgLabel">🂠 每回合出牌数</span>
+      <div class="cfgStep"><button data-k="plays" data-d="-1">−</button><b id="vPlays">2</b><button data-k="plays" data-d="1">＋</button></div>
+      <span class="cfgRange">1 ~ 4</span>
+    </div>
+    <button id="btnStart">开 始 战 斗</button>
+    <div id="recLine"></div>
+  </div></div>
+
+  <div id="overlay"><div id="overBox">
+    <div class="big" id="overIcon">🏆</div>
+    <div class="res" id="overText">胜利</div>
+    <div class="sub2" id="overSub"></div>
+    <div id="overStats"></div>
+    <button class="ghost" onclick="showShareCard()">📸 分享战绩</button>
+    <button onclick="onAgainClick()">再来一局</button>
+    <button class="ghost" onclick="showSetup()">🏠 返回主菜单</button>
+  </div></div>
+
+  <div id="rules"><div id="rulesBox">
+    <h3>📜 玩法说明</h3>
+    <b>🎯 目标</b>：先消灭对方全部士兵者胜。<br><br>
+
+    <b>🔄 回合流程</b><br>
+    ① 掷骰摸牌：摸对应点数的牌（开局 3 张；抽牌不限数量，<b>回合结束时需 ≤5 张</b>，超出须先弃牌）<br>
+    ② 打出卡牌：每张牌炮击一个<b>相同点数</b>的格子<br>
+    ③ 抽牌后随机空地刷 1 个道具箱（25% 为稀有箱）<br>
+    ・命中敌兵 💥 击杀 ｜ 命中 📦 得道具 ｜ 空地 🕳 弹坑<br><br>
+
+    <b>📦 普通道具</b>（炮击道具箱获得）<br>
+    <table>
+      <tr><td>🛡 护盾</td><td>士兵免疫下一次炮击</td></tr>
+      <tr><td>🔭 侦察</td><td>查看对方手牌一回合</td></tr>
+      <tr><td>💣 连环雷</td><td>下一炮连带相邻 4 格</td></tr>
+      <tr><td>⚡ 弹药补给</td><td>本回合多打 1 张牌</td></tr>
+      <tr><td>🎯 精准制导</td><td>下一张牌可打任意格；也可<b>点击宝箱直接开启</b>（不耗牌、回合继续）</td></tr>
+      <tr><td>❤️ 增援</td><td>随机空格补 1 名士兵</td></tr>
+      <tr><td>🔥 变废为宝</td><td>弃掉全部手牌，重抽等量新牌</td></tr>
+      <tr><td>🗡 身先士卒</td><td>牺牲一名己方士兵，抽 2 张牌且本回合出牌 +1（仅剩 1 兵时不可用）</td></tr>
+      <tr><td>🌀 移型换位</td><td>移动一名士兵到空地，或交换敌我两名士兵位置（护盾跟随士兵）</td></tr>
+    </table><br>
+
+    <b>✨ 稀有道具箱</b>（金色描边，炮击打不开）<br>
+    箱上标有<b>目标点数（7~12）</b>：点击箱子，选 <b>2 张点数之和正好等于它</b>的牌开启；或用精准制导直接解锁。<br>
+    ⚠️ <b>出过牌后不可开箱</b>；凑点开箱<b>消耗 1 次出牌次数</b>，之后可继续出牌。<br>
+    <table>
+      <tr><td>🛡 精锐援军</td><td>随机空地召唤 1 名<b>带护盾</b>士兵</td></tr>
+      <tr><td>👥 双子空降</td><td>两块随机空地各召唤 1 名士兵</td></tr>
+      <tr><td>🎲 后勤强化</td><td>接下来 <b>3 个回合</b>每回合抽牌数 +1</td></tr>
+    </table><br>
+
+    <b>⚙️ 其他规则</b><br>
+    ・<b>不能炮击自己的士兵</b>；但连环雷溅射会误伤己方，用前看清范围（悬停可预览）<br>
+    ・弃牌换牌：每回合 1 次，弃 2 张抽 1 张（重抽必与弃牌点数不同）<br>
+    ・<b>无空地结算</b>：地图被占满（无可用空地）时，立即按剩余士兵数定胜负，相等为平局<br>
+    ・结束回合：可随时提前结束，轮到电脑<br>
+    ・后手补偿：电脑开局 1 名士兵自带护盾<br>
+    ・难度：简单=乱打 ｜ 普通=标准 ｜ 困难=记牌+精准护盾+零误伤<br>
+    <br><button onclick="document.getElementById('rules').classList.remove('show')">关闭</button>
+  </div></div>
+
+  <div id="shareBox" onclick="if(event.target===this)this.classList.remove('show')">
+    <div id="shareCardWrap">
+      <img id="shareImg" alt="战绩分享卡">
+      <div class="shareBtns">
+        <a id="shareDl" download="六点战场-战绩.png">⬇️ 保存图片</a>
+        <button class="ghost" onclick="$('shareBox').classList.remove('show')">关闭</button>
+      </div>
+      <div class="shareTip">📲 手机长按图片保存，甩给好友约战</div>
+    </div>
+  </div>
+  <div id="emotePop"></div>
+  <div id="guidePop" style="display:none">
+    <div id="guideText"></div>
+    <div class="guideBtns"><button class="ghost" id="guideSkip">跳过</button><button id="guideNext">下一步</button></div>
+  </div>
+  <div id="toast"></div>
+
+<script>
+/* ================= 数据 ================= */
+const VALUES = [1,2,3,4,5,6];
+const ITEMS = {
+  shield:    { icon:'🛡', name:'护盾',     desc:'给一名己方士兵免疫下一次炮击' },
+  scout:     { icon:'🔭', name:'侦察',     desc:'查看对方手牌一回合' },
+  chain:     { icon:'💣', name:'连环雷',   desc:'下一次炮击连带相邻 4 格' },
+  ammo:      { icon:'⚡', name:'弹药补给', desc:'本回合多打一张牌' },
+  guided:    { icon:'🎯', name:'精准制导', desc:'下一张牌可打任意格；也可点击宝箱直接开启（不耗牌）' },
+  reinforce: { icon:'❤️', name:'增援',     desc:'随机空格补充 1 名士兵' },
+  desperate: { icon:'🔥', name:'变废为宝', desc:'弃掉全部手牌，抽取等量新牌' },
+  sacrifice: { icon:'🗡', name:'身先士卒', desc:'牺牲一名己方士兵，抽 2 张牌，本回合出牌次数 +1' },
+  swap:      { icon:'🌀', name:'移型换位', desc:'移动一名士兵到空地，或交换敌我两名士兵位置' },
+};
+const ITEM_KEYS = Object.keys(ITEMS);
+const RARE_ITEMS = {
+  shieldSummon: { icon:'🛡', name:'精锐援军', desc:'随机空地召唤 1 名带护盾的士兵' },
+  doubleSummon: { icon:'👥', name:'双子空降', desc:'两块随机空地各召唤 1 名士兵' },
+  drawBonus:    { icon:'🎲', name:'后勤强化', desc:'接下来 3 个回合，每回合抽牌数 +1' },
+};
+const RARE_KEYS = Object.keys(RARE_ITEMS);
+const RARE_CHANCE = 0.25;   // 稀有箱概率
+const MAX_BOXES = 4;        // 场上道具箱上限
+// 卡牌点数配色（与地图格子颜色呼应）
+const VCOLORS = ['#66778c','#5d8577','#8a774f','#755f85','#855d5d','#4f6d8a'];
+const VNAMES  = ['壹','贰','叁','肆','伍','陆'];
+// 骰面点数布局（3×3 网格，1=点亮）
+const PIP_LAYOUT = {
+  1:[0,0,0, 0,1,0, 0,0,0],
+  2:[1,0,0, 0,0,0, 0,0,1],
+  3:[1,0,0, 0,1,0, 0,0,1],
+  4:[1,0,1, 0,0,0, 1,0,1],
+  5:[1,0,1, 0,1,0, 1,0,1],
+  6:[1,0,1, 1,0,1, 1,0,1],
+};
+function pipsHtml(v){
+  const color = VCOLORS[v-1];
+  return `<div class="pips">` + PIP_LAYOUT[v].map(on=>
+    `<span class="dot${on?'':' off'}" style="background:${color}"></span>`).join('') + `</div>`;
+}
+// 难度
+let difficulty = 'normal';
+// 开局配置
+const CONFIG = { difficulty:'normal', soldiers:5, boxes:7, plays:2 };
+const CFG_RANGE = { soldiers:[3,8], boxes:[0,12], plays:[1,4] };
+const CFG_LABEL = { soldiers:'vSoldiers', boxes:'vBoxes', plays:'vPlays' };
+const SOLDIER = { player:'🪖', ai:'🤖' };
+let SIDE_NAME = { player:'你', ai:'电脑' };
+
+/* ================= 联机对战（PeerJS 房间码直连） ================= */
+const NET = { on:false, isHost:false, peer:null, conn:null, code:'', timer:null };
+/* 多 STUN 服务器冗余，提升 NAT 穿透成功率 */
+const PEER_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.miwifi.com:3478' },
+      { urls: 'stun:stun.chat.bilibili.com:3478' },
+      { urls: 'stun:stun.qq.com:3478' },
+    ],
+    iceCandidatePoolSize: 10,
+  },
+};
+const LOGS = [];   // 日志记录（联机同步用）：{ side:'player'|'ai'|'sys', msg }（本地视角）
+
+let S;   // 全局状态
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rand = n => Math.floor(Math.random()*n);
+const shuffle = a => { for(let i=a.length-1;i>0;i--){ const j=rand(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; };
+
+/* ================= 音效 ================= */
+const SFX = {};
+['dice','cannon','explosion','pickup','card','shield','win','lose','turn','summon'].forEach(n=>{
+  const a = new Audio('sfx/'+n+'.mp3'); a.preload = 'auto'; SFX[n] = a;
+});
+let soundOn = true;
+const FXQ = [];   // 联机音效事件队列：本地播放过的音效随状态同步给对方
+function sfx(n){
+  if (NET.on && !FXQ.includes(n)) FXQ.push(n);
+  playSound(n);
+}
+function playSound(n){
+  if (!soundOn) return;
+  const a = SFX[n]; if (!a) return;
+  try { a.currentTime = 0; a.play().catch(()=>{}); } catch(e){}
+}
+
+/* ================= 背景音乐 ================= */
+const BGM = new Audio('sfx/bgm.mp3');
+BGM.loop = true; BGM.volume = 0.28; BGM.preload = 'auto';
+let bgmOn = true;
+function bgmPlay(){ if (bgmOn) BGM.play().catch(()=>{}); }
+$('btnBgm').onclick = () => {
+  bgmOn = !bgmOn;
+  $('btnBgm').style.opacity = bgmOn ? 1 : .35;
+  if (bgmOn) bgmPlay(); else BGM.pause();
+};
+
+/* ================= 初始化 ================= */
+function initGame() {
+  difficulty = CONFIG.difficulty;   // 以配置界面的难度为准
+  // 格子：1-6 各 6 个
+  const values = shuffle(VALUES.flatMap(v => Array(6).fill(v)));
+  S = {
+    cells: values.map((v,i) => ({ idx:i, r:Math.floor(i/6), c:i%6, value:v,
+                                   soldier:null, item:null, crater:false, shield:false })),
+    hand: { player:[], ai:[] },
+    items: { player:[], ai:[] },
+    turn:'player', played:0, needPlay:2,
+    selCard:null, selItem:null,
+    guidedNext:{player:false, ai:false},
+    chainNext:{player:false, ai:false},
+    revealAi:false, busy:false, over:false,
+    discarded:false, discardMode:false, discardSel:[],
+    drawBonus:{player:0, ai:0},
+    bonusLeft:{player:0, ai:0},        // 后勤强化剩余生效回合数
+    bonusOn:{player:false, ai:false},  // 本回合后勤强化是否生效
+    forcedDiscard:0,                   // 回合结束强制弃牌张数（>0 时处于强制弃牌模式）
+    swapSrc:null,                      // 移型换位：第一选的士兵格索引
+    rareOpen:null, rareSel:[],
+    playedCards:[],   // 困难 AI 记牌用：玩家打出/弃掉的牌
+    stats:{ kills:{player:0, ai:0}, items:{player:0, ai:0}, rares:{player:0, ai:0}, rounds:0, start:Date.now() },
+  };
+  // 士兵（按配置数量）
+  const slots = shuffle([...Array(36).keys()]);
+  const NS = CONFIG.soldiers;
+  for (let i=0;i<NS;i++)      S.cells[slots[i]].soldier='player';
+  for (let i=NS;i<NS*2;i++)   S.cells[slots[i]].soldier='ai';
+  // 后手补偿：电脑随机 1 名士兵开局自带护盾
+  const aiStart = S.cells.filter(c=>c.soldier==='ai');
+  aiStart[rand(aiStart.length)].shield = true;
+  // 补给箱（按配置数量，开局也有 25% 概率是稀有箱）
+  for (let i=NS*2;i<NS*2+CONFIG.boxes;i++) {
+    const cell = S.cells[slots[i]];
+    if (Math.random() < RARE_CHANCE) {
+      cell.rareItem = RARE_KEYS[rand(RARE_KEYS.length)];
+      cell.rareTarget = 7 + rand(6);
+    }
+    else cell.item = ITEM_KEYS[rand(ITEM_KEYS.length)];
+  }
+  // 初始手牌：每人 3 张
+  for (let i=0;i<3;i++){ S.hand.player.push(1+rand(6)); S.hand.ai.push(1+rand(6)); }
+
+  $('overlay').classList.remove('show');
+  document.querySelectorAll('.diff').forEach(x=>x.classList.toggle('active', x.dataset.d===difficulty));
+  LOGS.length = 0; FXQ.length = 0; $('log').innerHTML='';
+  bgmPlay();
+  log('sys','⚔️ 战斗开始！你先手，回合开始先掷骰摸牌。');
+  const rareCount = S.cells.filter(c=>c.rareItem).length;
+  if (rareCount) log('sys', `✨ 本局开局刷出 ${rareCount} 个稀有道具箱，快去抢开！`);
+  log('sys', `🛡 后手补偿：${SIDE_NAME.ai}一名士兵开局自带护盾（可抵挡一次炮击）`);
+  beginPlayerTurn(true);
+  render();
+}
+
+/* ================= 日志 / 提示 ================= */
+function log(cls, msg){
+  const side = cls==='me' ? 'player' : (cls==='ai' ? 'ai' : 'sys');
+  LOGS.unshift({ side, msg });
+  if (LOGS.length > 80) LOGS.pop();
+  const d = document.createElement('div');
+  d.className = cls; d.textContent = msg;
+  $('log').prepend(d);
+}
+function renderLogs(){
+  $('log').innerHTML = '';
+  LOGS.forEach(e => {
+    const d = document.createElement('div');
+    d.className = e.side==='player' ? 'me' : (e.side==='ai' ? 'ai' : 'sys');
+    d.textContent = e.msg;
+    $('log').appendChild(d);
+  });
+}
+/* 联机：把对方视角日志里的称呼换成本地视角（你 ↔ 对手） */
+function swapNames(msg){
+  return msg.split('对手').join('').split('你').join('对手').split('').join('你');
+}
+let toastTimer;
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.style.opacity=0, 1800);
+}
+
+/* ================= 渲染 ================= */
+function render() {
+  // 无空地判定：地图被占满时立即按剩余兵力结算（联机时仅由行动方触发，接收端等同步）
+  if (!S.over && !(NET.on && S.turn==='ai') && !S.cells.some(c=>!c.soldier && !c.item && !c.rareItem && !c.crater)) {
+    noSpaceEnd();
+    return;
+  }
+  // 地图
+  const map = $('map'); map.innerHTML='';
+  S.cells.forEach(cell => {
+    const el = document.createElement('div');
+    const canActNow = !S.over && !S.busy && S.turn==='player';
+    el.className = `cell v${cell.value}` + (cell.crater?' crater':'') + (isTargetable(cell)?' targetable':'');
+    if (cell.rareItem) el.classList.add('rarebox') + (canActNow && el.classList.add('canopen'));
+    if (cell.item && !cell.crater && S.guidedNext.player && canActNow) el.classList.add('canopen');
+    el.innerHTML = `<span class="val">${cell.value}</span>`;
+    if (cell.soldier) {
+      el.innerHTML += `<span class="soldier">${SOLDIER[cell.soldier]}</span>`;
+      if (cell.shield) el.innerHTML += `<span class="badge">🛡</span>`;
+    }
+    if (cell.rareItem) el.innerHTML += `<span class="itembox">🎁</span><span class="rareTag">稀·${cell.rareTarget}</span>`;
+    else if (cell.item && !cell.crater) el.innerHTML += `<span class="itembox">📦</span>`;
+    el.onclick = () => onCellClick(cell.idx, el);
+    map.appendChild(el);
+  });
+  // 连环雷：选中牌后悬停可打格子，实时预览轰炸范围（中心+相邻 4 格）
+  if (S.chainNext.player && S.selCard!==null && !S.over && !S.busy && S.turn==='player') {
+    S.cells.forEach(cell => {
+      const el = map.children[cell.idx];
+      if (!el || !el.classList.contains('targetable')) return;
+      el.onmouseenter = () => markChainArea(cell.idx, true);
+      el.onmouseleave = () => markChainArea(cell.idx, false);
+    });
+  }
+  // 手牌
+  const hand = $('hand'); hand.innerHTML='';
+  S.hand.player.forEach((v,i) => {
+    const c = document.createElement('div');
+    c.className = 'card' + (S.selCard===i?' selected':'') + (S.discardSel && S.discardSel.includes(i)?' discard-sel':'') + (S.rareSel && S.rareSel.includes(i)?' selected':'');
+    const vc = VCOLORS[v-1];
+    c.innerHTML = `<div class="cband" style="background:linear-gradient(90deg,${vc},${vc}cc)"></div>
+      <div class="corner tl" style="color:${vc}">${v}</div>
+      ${pipsHtml(v)}
+      <div class="corner br" style="color:${vc}">${v}</div>
+      <div class="suit" style="color:${vc}">${VNAMES[v-1]}</div>`;
+    c.onclick = () => onCardClick(i);
+    hand.appendChild(c);
+  });
+  // 电脑手牌
+  const ah = $('aiHand'); ah.innerHTML='';
+  S.hand.ai.forEach(v => {
+    const m = document.createElement('div');
+    m.className = 'mini' + (S.revealAi?' open':'');
+    m.textContent = S.revealAi ? v : '✦';
+    ah.appendChild(m);
+  });
+  $('aiItemBar').textContent = S.items.ai.length ? `${NET.on?'🎮':'🤖'} ${SIDE_NAME.ai}持有道具 ×${S.items.ai.length}` : '';
+  // 道具栏
+  const bar = $('itemBar'); bar.innerHTML='';
+  S.items.player.forEach((k,i) => {
+    const it = ITEMS[k];
+    const d = document.createElement('div');
+    d.className = 'itemCard' + (S.selItem===i?' selected':'');
+    d.innerHTML = `<div class="ic">${it.icon}</div><b>${it.name}</b><br><span style="opacity:.7">${it.desc}</span>`;
+    d.onclick = () => onItemClick(i);
+    d.title = it.desc;
+    bar.appendChild(d);
+  });
+  if (!S.items.player.length) bar.innerHTML = '<span style="color:#5c6b7c;font-size:12px;padding:6px">（炮击 📦 补给箱可获得道具）</span>';
+  // 计数与状态
+  $('pCount').textContent = countSoldiers('player');
+  $('aCount').textContent = countSoldiers('ai');
+  const banner = $('turnBanner');
+  if (S.over) { banner.textContent = '战斗结束'; banner.className='panel'; }
+  else if (S.turn==='player') {
+    banner.textContent = `🪖 你的回合 · 还可打出 ${S.needPlay - S.played} 张牌`;
+    banner.className = 'panel mine';
+  } else {
+    banner.textContent = `${NET.on?'🎮':'🤖'} ${SIDE_NAME.ai}行动中…`;
+    banner.className = 'panel theirs';
+  }
+  $('playState').textContent = S.turn==='player' && !S.over ? `已打出 ${S.played}/${S.needPlay}` : '';
+  // 操作按钮状态
+  const canAct = !S.over && !S.busy && S.turn==='player';
+  $('btnEndTurn').style.opacity = canAct ? 1 : .4;
+  $('btnDiscard').style.opacity = (canAct && !S.discarded) ? 1 : .4;
+  $('hint').textContent =
+    S.hand.player.length > 5 ? `⚠️ 手牌 ${S.hand.player.length} 张，结束回合前需弃至 5 张` :
+    (S.turn==='player' && !S.over && S.played>=S.needPlay && S.items.player.length) ? '🎁 出牌完毕：可用道具，或点「结束回合」' :
+    S.chainNext.player ? '💣 连环雷已激活：下一炮连带相邻格' :
+    S.guidedNext.player ? '🎯 精准制导已激活：可打任意格，也可点击宝箱直接开启' : '';
+}
+
+function countSoldiers(side){ return S.cells.filter(c=>c.soldier===side).length; }
+
+/* ================= 出牌交互 ================= */
+/* 连环雷轰炸范围预览 */
+function markChainArea(idx, on){
+  const {r,c} = S.cells[idx];
+  const area = [idx];
+  [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].forEach(([rr,cc])=>{
+    if (rr>=0 && rr<6 && cc>=0 && cc<6) area.push(rr*6+cc);
+  });
+  area.forEach(i => { const el = $('map').children[i]; if (el) el.classList.toggle('chainZone', on); });
+}
+
+function isTargetable(cell){
+  if (S.over || S.busy || S.turn!=='player') return false;
+  if (S.played >= S.needPlay) return false;   // 出牌次数已用完
+  if (cell.rareItem) return false;          // 稀有箱不能被普通炮击
+  if (cell.soldier==='player') return false;   // 不能直接炮击自己的士兵（连环雷溅射除外）
+  if (S.selCard===null) return false;
+  if (S.guidedNext.player) return true;
+  return cell.value === S.hand.player[S.selCard];
+}
+
+function onCardClick(i){
+  if (S.over || S.busy || S.turn!=='player') return;
+  if (S.rareOpen !== null) {
+    const p = S.rareSel.indexOf(i);
+    if (p >= 0) S.rareSel.splice(p,1);
+    else if (S.rareSel.length < 2) { S.rareSel.push(i); sfx('card'); }
+    render();
+    if (S.rareSel.length === 2) setTimeout(tryOpenRare, 300);
+    return;
+  }
+  if (S.discardMode) {
+    const lim = S.forcedDiscard > 0 ? S.forcedDiscard : 2;
+    const p = S.discardSel.indexOf(i);
+    if (p >= 0) S.discardSel.splice(p,1);
+    else if (S.discardSel.length < lim) { S.discardSel.push(i); sfx('card'); }
+    render();
+    if (S.discardSel.length === lim) setTimeout(S.forcedDiscard > 0 ? doForcedDiscard : doDiscard, 300);
+    return;
+  }
+  S.selItem = null; S.swapSrc = null;
+  if (S.played >= S.needPlay) { toast('🚫 本回合出牌次数已用完，可使用道具或结束回合'); render(); return; }
+  S.selCard = S.selCard===i ? null : i;
+  render();
+}
+
+/* ---------- 弃牌：弃 2 抽 1，每回合一次 ---------- */
+function doDiscard(){
+  if (!S.discardMode || S.discardSel.length !== 2) return;
+  const idxs = S.discardSel.slice().sort((a,b)=>b-a);
+  const vals = idxs.map(i=>S.hand.player[i]);
+  idxs.forEach(i=>S.hand.player.splice(i,1));
+  S.playedCards.push(...vals);   // 记牌：弃牌也会被困难 AI 记住
+  const pool = [1,2,3,4,5,6].filter(v => !vals.includes(v));   // 重抽必与弃掉的牌点数不同
+  const nv = pool[rand(pool.length)];
+  S.hand.player.push(nv);
+  S.discarded = true;
+  exitDiscardMode();
+  sfx('card');
+  log('me', `🗑 你弃掉了 ${vals.join('、')} 点牌，重抽 1 张 ${nv} 点牌`);
+  toast('🗑 弃牌成功，重抽 1 张');
+  render();
+  netSync();   // 联机：同步弃牌结果
+}
+function exitDiscardMode(){
+  S.discardMode = false; S.discardSel = [];
+  S.forcedDiscard = 0;
+  const b = $('btnDiscard');
+  b.textContent = '🗑 弃牌换牌';
+  b.classList.remove('discarding');
+}
+
+/* ---------- 回合结束手牌检查：超过 5 张必须先弃到 5 张 ---------- */
+function enterForcedDiscard(){
+  S.forcedDiscard = S.hand.player.length - 5;
+  S.discardMode = true; S.discardSel = []; S.selCard = null; S.selItem = null;
+  S.rareOpen = null; S.rareSel = [];
+  const b = $('btnDiscard');
+  b.textContent = `弃 ${S.forcedDiscard} 张牌`;
+  b.classList.add('discarding');
+  toast(`⚠️ 手牌超过 5 张，请弃掉 ${S.forcedDiscard} 张才能结束回合`);
+  render();
+}
+function doForcedDiscard(){
+  if (!S.forcedDiscard || S.discardSel.length !== S.forcedDiscard) return;
+  const idxs = S.discardSel.slice().sort((a,b)=>b-a);
+  const vals = idxs.map(i=>S.hand.player[i]);
+  idxs.forEach(i=>S.hand.player.splice(i,1));
+  S.playedCards.push(...vals);
+  exitDiscardMode();
+  sfx('card');
+  log('me', `🗑 手牌超限，你弃掉了 ${vals.join('、')} 点牌（回合结束手牌需 ≤5 张）`);
+  render();
+  netSync();
+  endTurn();   // 弃牌完成，正式结束回合
+}
+
+function onCellClick(idx, el){
+  if (S.over || S.busy || S.turn!=='player') return;
+  if (S.forcedDiscard > 0) { toast(`⚠️ 请先弃掉 ${S.forcedDiscard} 张手牌（回合结束需 ≤5 张）`); return; }
+  const cell = S.cells[idx];
+  if (cell.rareItem) {
+    if (S.guidedNext.player) { guidedOpenBox(idx); return; }   // 精准制导：直接解锁
+    if (S.selCard !== null) { toast(`🔒 稀有道具箱要用 2 张点数和=${cell.rareTarget} 的牌开启`); return; }
+    if (S.played > 0) { toast('🔒 本回合已经出过牌，不能再开启稀有宝箱'); return; }
+    if (S.rareOpen === idx) { S.rareOpen = null; S.rareSel = []; render(); return; }
+    exitDiscardMode();
+    S.rareOpen = idx; S.rareSel = [];
+    toast(`✨ 选择 2 张手牌，点数和等于 ${cell.rareTarget} 即可开启`);
+    render();
+    return;
+  }
+  // 精准制导：点击普通补给箱也可直接开启
+  if (cell.item && !cell.crater && S.guidedNext.player && S.selCard===null && S.rareOpen===null) {
+    guidedOpenBox(idx); return;
+  }
+  if (S.rareOpen !== null || S.selCard===null) return;
+  if (cell.soldier==='player') { toast('🚫 不能炮击自己的士兵'); return; }
+  if (!S.guidedNext.player && cell.value !== S.hand.player[S.selCard]) return;
+  playCard('player', S.selCard, idx);
+}
+
+/* 精准制导：点击任意宝箱直接开启（只耗道具、不耗手牌，回合继续进行） */
+function guidedOpenBox(idx){
+  const cell = S.cells[idx];
+  S.guidedNext.player = false;
+  if (cell.rareItem) {
+    const key = cell.rareItem;
+    cell.rareItem = null; cell.rareTarget = null; cell.crater = true;
+    S.stats.rares.player++;
+    sfx('pickup');
+    log('me', `🎯 精准制导直接解锁了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
+    const summoned = applyRareItem('player', key);
+    render();
+    playSummonFx(summoned);
+    netSync();
+    checkOver();
+  } else if (cell.item) {
+    const k = cell.item; cell.item = null; cell.crater = true;
+    S.items.player.push(k); S.stats.items.player++;
+    sfx('pickup');
+    floatText(idx, ITEMS[k].icon);
+    log('me', `🎯 精准制导远程开启了 (${cell.r+1},${cell.c+1}) 的补给箱：【${ITEMS[k].icon}${ITEMS[k].name}】`);
+    render();
+    netSync();
+  }
+}
+
+/* ---------- 稀有道具箱：两张牌点数和正好等于目标点数开启 ---------- */
+function tryOpenRare(){
+  if (S.rareOpen===null || S.rareSel.length!==2) return;
+  if (S.played > 0) {   // 本回合已出过牌，禁止开箱
+    toast('🔒 本回合已经出过牌，不能再开启稀有宝箱');
+    S.rareOpen = null; S.rareSel = []; render();
+    return;
+  }
+  const [a,b] = S.rareSel;
+  const sum = S.hand.player[a] + S.hand.player[b];
+  const cell = S.cells[S.rareOpen];
+  if (sum !== cell.rareTarget) {
+    toast(`点数和为 ${sum}，需要正好等于 ${cell.rareTarget}，重新选`);
+    S.rareSel = []; render();
+    return;
+  }
+  const key = cell.rareItem;
+  S.rareSel.slice().sort((x,y)=>y-x).forEach(x=>S.hand.player.splice(x,1));
+  cell.rareItem = null; cell.rareTarget = null; cell.crater = true;
+  S.rareOpen = null; S.rareSel = [];
+  S.played++;   // 开箱消耗 1 次出牌次数，之后可继续出牌
+  S.stats.rares.player++;
+  sfx('pickup');
+  log('me', `✨ 你用点数和 ${sum} 开启了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】（消耗 1 次出牌）`);
+  const summoned = applyRareItem('player', key);
+  render();
+  playSummonFx(summoned);
+  netSync();   // 联机：同步开箱结果
+  if (checkOver()) return;
+  if (S.played >= S.needPlay) {
+    if (S.items.player.length) toast('🎁 出牌次数用完，可使用道具或点「结束回合」');
+    else setTimeout(()=>endTurn(), summoned.length ? 1800 : 600);
+  }
+}
+
+function applyRareItem(side, key){
+  const name = SIDE_NAME[side];
+  if (key==='drawBonus') {
+    S.drawBonus[side]++;
+    S.bonusLeft[side] = 3;
+    log(side==='player'?'me':'ai', `🎲 ${name}获得【后勤强化】：接下来 3 个回合，每回合抽 ${2+S.drawBonus[side]} 张牌！`);
+    toast(`🎲 ${name}获得【后勤强化】：抽牌 +1（持续 3 回合）`);
+    const dp = document.querySelector('.dicePanel');
+    if (dp) { dp.classList.add('goldFlash'); setTimeout(()=>dp.classList.remove('goldFlash'), 1500); }
+    sfx('summon');
+    return [];
+  }
+  const n = key==='shieldSummon' ? 1 : 2;
+  const empty = S.cells.filter(c=>!c.soldier && !c.item && !c.rareItem && !c.crater);
+  const summoned = [];
+  for (let k=0; k<n && empty.length; k++) {
+    const cell = empty.splice(rand(empty.length),1)[0];
+    cell.soldier = side;
+    if (key==='shieldSummon') cell.shield = true;
+    log(side==='player'?'me':'ai',
+      key==='shieldSummon'
+        ? `🛡 【精锐援军】${name}的带护盾士兵降临在 (${cell.r+1},${cell.c+1})`
+        : `👥 【双子空降】${name}的士兵空降在 (${cell.r+1},${cell.c+1})`);
+    summoned.push(cell.idx);
+  }
+  if (!summoned.length) log('sys','😅 地图上没有空地，召唤失败');
+  return summoned;
+}
+
+/* 召唤特效：金光闪现 + 音效，逐个降临 */
+function playSummonFx(indices){
+  (indices||[]).forEach((idx, i) => {
+    setTimeout(() => {
+      const el = $('map').children[idx];
+      if (!el) return;
+      el.classList.add('spawned');
+      floatText(idx, '✨');
+      sfx('summon');
+      setTimeout(()=>el.classList.remove('spawned'), 1200);
+    }, i*380);
+  });
+}
+
+async function playCard(side, cardIdx, targetIdx){
+  if (S.played >= S.needPlay) return;   // 防御：出牌次数用完不允许再出牌
+  const cardEl = (side==='player' ? $('hand') : $('aiHand')).children[cardIdx];   // 出牌动画起点（先取，render 后会被重建）
+  const card = S.hand[side][cardIdx];
+  S.hand[side].splice(cardIdx,1);
+  if (side==='player') S.playedCards.push(card);   // 记牌
+  S.selCard = null;
+  const guided = S.guidedNext[side]; S.guidedNext[side] = false;
+  const chain  = S.chainNext[side];  S.chainNext[side]  = false;
+
+  S.busy = true; render();
+  log(side==='player'?'me':'ai', `${SIDE_NAME[side]}打出 ${card} 点牌，炮击 (${S.cells[targetIdx].r+1},${S.cells[targetIdx].c+1})${guided?' 🎯':''}${chain?' 💣':''}`);
+  sfx('card'); sfx('cannon');
+  flyShellTo(targetIdx, cardEl);
+  await sleep(350);
+
+  const targets = [targetIdx];
+  if (chain) {
+    const {r,c} = S.cells[targetIdx];
+    [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].forEach(([rr,cc]) => {
+      if (rr>=0&&rr<6&&cc>=0&&cc<6) targets.push(rr*6+cc);
+    });
+  }
+  for (const ti of targets) resolveHit(side, ti);
+
+  S.played++;
+  S.busy = false; render();
+  flushCellFx();   // render 重建地图后再挂爆炸/倒下动画
+
+  if (checkOver()) return;   // 结束由 endGame 负责同步
+  netSync();   // 联机：同步本次炮击结果
+  if (S.played >= S.needPlay) {
+    if (S.items.player.length) {
+      // 手里还有道具：不自动结束，等玩家用道具或手动结束
+      toast('🎁 出牌次数用完，可使用道具或点「结束回合」');
+    } else {
+      await sleep(500);
+      endTurn();   // 出牌完毕，轮到对手（联机）或电脑（人机）
+    }
+  }
+}
+
+/* ================= 炮击结算 ================= */
+function resolveHit(attacker, idx){
+  const cell = S.cells[idx];
+  if (cell.rareItem) {
+    log('sys', `🔒 (${cell.r+1},${cell.c+1}) 的稀有道具箱纹丝不动——需要两张点数和=${cell.rareTarget} 的牌才能开启`);
+    return;
+  }
+  _pendingCellFx.push({ idx, boom:true });
+
+  const enemy = attacker==='player' ? 'ai' : 'player';
+  const pos = `(${cell.r+1},${cell.c+1})`;
+
+  if (cell.soldier === enemy) {
+    if (cell.shield) {
+      cell.shield = false;
+      sfx('shield');
+      log('sys', `🛡 ${pos} 的护盾挡下了炮击！`);
+    } else {
+      cell.soldier = null; cell.crater = true;
+      S.stats.kills[attacker]++;
+      sfx('explosion');
+      shakeMap();
+      _pendingCellFx.push({ idx, txt:'💥', death:enemy });
+      log(attacker==='player'?'me':'ai', `💥 命中！${SIDE_NAME[enemy]}一名士兵在 ${pos} 阵亡`);
+    }
+  } else if (cell.soldier === attacker) {
+    // 直接炮击自己士兵已被禁止，能走到这里只会是连环雷溅射 → 误杀
+    cell.soldier = null; cell.shield = false; cell.crater = true;
+    sfx('explosion');
+    shakeMap();
+    _pendingCellFx.push({ idx, txt:'💥', death:attacker });
+    log('sys', `😱 ${pos} 连环雷误杀！${SIDE_NAME[attacker]}一名己方士兵被自己人炸死`);
+  } else if (cell.item && !cell.crater) {
+    const k = cell.item; cell.item = null; cell.crater = true;
+    S.items[attacker].push(k);
+    S.stats.items[attacker]++;
+    sfx('pickup');
+    _pendingCellFx.push({ idx, txt:ITEMS[k].icon });
+    log(attacker==='player'?'me':'ai', `🎁 ${SIDE_NAME[attacker]}在 ${pos} 拾取道具【${ITEMS[k].icon}${ITEMS[k].name}】`);
+  } else {
+    cell.crater = true;
+    log('sys', `🕳 ${pos} 被炸出弹坑`);
+  }
+}
+
+function floatText(idx, txt){
+  const el = $('map').children[idx];
+  if (!el) return;
+  const f = document.createElement('div');
+  f.className = 'flyDmg'; f.textContent = txt;
+  el.appendChild(f); setTimeout(()=>f.remove(), 1000);
+}
+
+/* ================= 打击感特效 ================= */
+let _pendingCellFx = [];   // 炮击产生的格子特效，render 重建地图后再挂上，避免被清掉
+function shakeMap(){
+  const w = $('mapWrap');
+  w.classList.remove('shake'); void w.offsetWidth; w.classList.add('shake');
+}
+function flyShellTo(idx, fromEl){
+  const map = $('map'); const target = map.children[idx];
+  if (!target) return;
+  const tr = target.getBoundingClientRect();
+  let fx = innerWidth/2, fy = innerHeight - 60;
+  if (fromEl) { const r = fromEl.getBoundingClientRect(); fx = r.left + r.width/2; fy = r.top + r.height/2; }
+  const s = document.createElement('div');
+  s.className = 'flyShell';
+  s.style.left = (fx-7)+'px'; s.style.top = (fy-7)+'px';
+  document.body.appendChild(s);
+  requestAnimationFrame(()=>{
+    s.style.transform = `translate(${tr.left+tr.width/2-fx}px,${tr.top+tr.height/2-fy}px) scale(.55)`;
+    s.style.opacity = .85;
+  });
+  setTimeout(()=>s.remove(), 330);
+}
+function soldierDieFx(idx, side){
+  const el = $('map').children[idx];
+  if (!el) return;
+  const d = document.createElement('span');
+  d.className = 'dieFall'; d.textContent = SOLDIER[side];
+  el.appendChild(d); setTimeout(()=>d.remove(), 750);
+}
+function flushCellFx(){
+  _pendingCellFx.forEach(f => {
+    const el = $('map').children[f.idx];
+    if (el && f.boom) { el.classList.add('boom'); setTimeout(()=>el.classList.remove('boom'), 500); }
+    if (f.txt) floatText(f.idx, f.txt);
+    if (f.death) soldierDieFx(f.idx, f.death);
+  });
+  _pendingCellFx = [];
+}
+
+/* ================= 道具 ================= */
+/* 移型换位：两阶段选择（先选士兵，再选空地移动或敌方士兵交换，护盾跟随士兵） */
+function pickSwapTarget(idx, itemIdx){
+  const cell = S.cells[idx];
+  if (S.swapSrc === null) {
+    S.swapSrc = idx;
+    toast(cell.soldier==='player'
+      ? '🌀 再点空地（移动过去），或点一名敌方士兵（交换位置）'
+      : '🌀 再点空地（把敌兵移过去），或点一名你的士兵（交换位置）');
+    render();
+    const src = S.cells[S.swapSrc];
+    S.cells.forEach(c2 => {
+      const el2 = $('map').children[c2.idx];
+      const emptyOk = !c2.soldier && !c2.item && !c2.rareItem && !c2.crater;
+      const swapOk  = c2.soldier && c2.soldier !== src.soldier && c2.idx !== S.swapSrc;
+      if (emptyOk || swapOk) {
+        el2.classList.add('targetable');
+        el2.onclick = () => applySwap(S.swapSrc, c2.idx, itemIdx);
+      }
+    });
+    // 点第一选的格子本身 = 取消重选
+    const srcEl = $('map').children[S.swapSrc];
+    srcEl.onclick = () => { S.swapSrc = null; render(); };
+  }
+}
+function applySwap(a, b, itemIdx){
+  const ca = S.cells[a], cb = S.cells[b];
+  if (cb.soldier) {   // 交换敌我两名士兵位置（护盾跟随士兵）
+    [ca.soldier, cb.soldier] = [cb.soldier, ca.soldier];
+    [ca.shield,  cb.shield]  = [cb.shield,  ca.shield];
+    log('me', `🌀 移型换位！你的士兵与 (${cb.r+1},${cb.c+1}) 的敌方士兵交换了位置`);
+  } else {            // 移动士兵到空地（原地变回空地，护盾跟随）
+    const who = ca.soldier==='player' ? '你的' : '敌方';
+    cb.soldier = ca.soldier; cb.shield = ca.shield;
+    ca.soldier = null; ca.shield = false;
+    log('me', `🌀 移型换位！${who}士兵从 (${ca.r+1},${ca.c+1}) 移动到 (${cb.r+1},${cb.c+1})`);
+  }
+  S.items.player.splice(itemIdx,1);
+  S.selItem = null; S.swapSrc = null;
+  sfx('summon');
+  render();
+  netSync();
+}
+
+function onItemClick(i){
+  if (S.over || S.busy || S.turn!=='player') return;
+  const k = S.items.player[i];
+
+  if (k==='desperate' && !S.hand.player.length) { toast('手牌已空，无法变废为宝'); return; }
+  // 卡牌类道具需要本回合还有出牌次数才能发挥（弹药补给除外：它本身就是加次数的）
+  if ((k==='guided' || k==='chain') && S.played >= S.needPlay) {
+    toast('🚫 出牌次数已用完，这个道具留到下回合再用吧'); return;
+  }
+
+  if (k==='swap') {
+    if (S.selItem===i) { S.selItem=null; S.swapSrc=null; render(); return; }
+    S.selItem = i; S.selCard = null; S.swapSrc = null;
+    toast('🌀 先点击一名士兵（敌我皆可），再点空地移动或点敌方士兵交换');
+    render();
+    S.cells.forEach(cell => {
+      const el = $('map').children[cell.idx];
+      if (cell.soldier) {
+        el.classList.add('targetable');
+        el.onclick = () => pickSwapTarget(cell.idx, i);
+      }
+    });
+    return;
+  }
+
+  if (k==='sacrifice') {
+    if (countSoldiers('player') <= 1) { toast('🗡 只剩最后一名士兵，不能牺牲'); return; }
+    if (S.selItem===i) { S.selItem=null; render(); return; }
+    S.selItem = i; S.selCard = null; S.swapSrc = null;
+    toast('🗡 点击一名你的士兵，将其牺牲并抽取 2 张牌');
+    render();
+    S.cells.forEach(cell => {
+      const el = $('map').children[cell.idx];
+      if (cell.soldier==='player') {
+        el.classList.add('targetable');
+        el.onclick = () => {
+          cell.soldier = null; cell.shield = false; cell.crater = true;
+          S.items.player.splice(i,1); S.selItem = null;
+          const drew = [1+rand(6), 1+rand(6)];
+          S.hand.player.push(...drew);
+          S.needPlay++;   // 卖血换节奏：本回合多一次出牌
+          sfx('explosion'); sfx('card');
+          floatText(cell.idx, '💔');
+          log('me', `🗡 身先士卒！(${cell.r+1},${cell.c+1}) 的士兵牺牲，你抽到 ${drew.join('、')} 点牌，本回合出牌次数 +1`);
+          render();
+          netSync();
+        };
+      }
+    });
+    return;
+  }
+
+  if (k==='shield') {
+    if (S.selItem===i) { S.selItem=null; render(); return; }
+    S.selItem = i; S.selCard = null; S.swapSrc = null;
+    toast('🛡 点击一名你的士兵，为其套上护盾');
+    render();
+    // 复用格子点击：给 cell 加目标态
+    S.cells.forEach(cell => {
+      const el = $('map').children[cell.idx];
+      if (cell.soldier==='player' && !cell.shield) {
+        el.classList.add('targetable');
+        el.onclick = () => {
+          cell.shield = true;
+          S.items.player.splice(i,1); S.selItem=null;
+          log('me', `🛡 你给 (${cell.r+1},${cell.c+1}) 的士兵套上护盾`);
+          render();
+          netSync();   // 联机：同步护盾
+        };
+      }
+    });
+    return;
+  }
+
+  // 即时生效类
+  S.items.player.splice(i,1);
+  let reinforceIdx = null;
+  if (k==='scout') {
+    S.revealAi = true;
+    log('me',`🔭 你使用了侦察，${SIDE_NAME.ai}的手牌暴露了！`);
+  } else if (k==='chain') {
+    S.chainNext.player = true;
+    log('me','💣 连环雷就绪：下一次炮击将连带相邻 4 格');
+    toast('💣 连环雷已激活，打出一张牌试试');
+  } else if (k==='ammo') {
+    S.needPlay++;
+    log('me',`⚡ 弹药补给：本回合可以打出 ${S.needPlay} 张牌！`);
+  } else if (k==='guided') {
+    S.guidedNext.player = true;
+    log('me','🎯 精准制导就绪：下一张牌可炮击任意格子');
+    toast('🎯 已激活，选一张牌，可打任意格');
+  } else if (k==='reinforce') {
+    reinforceIdx = doReinforce('player');
+  } else if (k==='desperate') {
+    const n = S.hand.player.length;
+    S.playedCards.push(...S.hand.player);   // 记牌：弃掉的牌
+    S.hand.player = Array.from({length:n}, ()=>1+rand(6));
+    S.selCard = null;
+    sfx('card');
+    log('me', `🔥 变废为宝！你弃掉全部 ${n} 张手牌，重抽 ${n} 张`);
+    toast(`🔥 变废为宝！重抽 ${n} 张手牌`);
+  }
+  render();
+  if (typeof reinforceIdx === 'number') playSummonFx([reinforceIdx]);   // 增援降临特效+音效
+  netSync();   // 联机：同步道具使用效果
+}
+
+function doReinforce(side){
+  if (countSoldiers(side) >= CONFIG.soldiers) { log('sys',`❤️ 士兵已满编（${CONFIG.soldiers} 名），增援无效`); return null; }
+  const empty = S.cells.filter(c=>!c.soldier && !c.item && !c.rareItem && !c.crater);   // 不能落在稀有箱上
+  if (!empty.length) { log('sys','❤️ 没有可部署的空格，增援无效'); return null; }
+  const cell = empty[rand(empty.length)];
+  cell.soldier = side;
+  log(side==='player'?'me':'ai', `❤️ ${SIDE_NAME[side]}的增援士兵空降在 (${cell.r+1},${cell.c+1})`);
+  return cell.idx;
+}
+
+/* ---------- 抽牌后刷新道具箱 ---------- */
+function spawnBox(){
+  const boxes = S.cells.filter(c=>c.item || c.rareItem).length;
+  if (boxes >= MAX_BOXES) return;
+  const empty = S.cells.filter(c=>!c.soldier && !c.item && !c.rareItem && !c.crater);
+  if (!empty.length) return;
+  const cell = empty[rand(empty.length)];
+  if (Math.random() < RARE_CHANCE) {
+    cell.rareItem = RARE_KEYS[rand(RARE_KEYS.length)];
+    cell.rareTarget = 7 + rand(6);   // 7~12 的指定目标点数
+    log('sys', `✨ 稀有道具箱降临在 (${cell.r+1},${cell.c+1})！需 2 张点数和=${cell.rareTarget} 的牌开启`);
+  } else {
+    cell.item = ITEM_KEYS[rand(ITEM_KEYS.length)];
+    log('sys', `📦 一个道具箱出现在 (${cell.r+1},${cell.c+1})`);
+  }
+}
+
+/* ================= 掷骰摸牌 ================= */
+async function diceAndDraw(side){
+  S.busy = true; render();
+  sfx('dice');
+  const ds = $('diceSide');
+  ds.textContent = side==='player' ? '🪖 你掷骰摸牌' : `${NET.on?'🎮':'🤖'} ${SIDE_NAME.ai}掷骰摸牌`;
+  ds.className = side==='player' ? 'mine' : 'theirs';
+  const diceCount = 2 + (S.bonusOn[side] ? (S.drawBonus[side] || 0) : 0);
+  const vals = Array.from({length:diceCount}, ()=>1+rand(6));
+  const row = $('diceRow');
+  row.innerHTML = '';
+  const diceEls = vals.map(() => {
+    const d = document.createElement('div');
+    d.className = 'die rolling'; d.textContent = '?';
+    row.appendChild(d); return d;
+  });
+  const anim = setInterval(()=>diceEls.forEach(d=>d.textContent=1+rand(6)), 90);
+  await sleep(700);
+  clearInterval(anim);
+  diceEls.forEach((d,i)=>{ d.classList.remove('rolling'); d.innerHTML = pipsHtml(vals[i]); });
+
+  // 抽牌阶段不设手牌上限；回合结束时需 ≤5 张
+  for (const v of vals) S.hand[side].push(v);
+  log(side==='player'?'me':'ai',
+    `🎲 ${SIDE_NAME[side]}掷出 ${vals.join('、')}，摸到 ${vals.join('、')} 点牌`);
+  spawnBox();   // 抽牌阶段后刷新道具箱
+  render();
+  netSync();   // 联机：同步摸牌与刷箱结果给对手
+  await sleep(600);
+}
+
+/* ---------- 玩家回合：掷骰摸牌 → 出牌 ---------- */
+async function beginPlayerTurn(first=false){
+  startTurn('player', first);
+  S.stats.rounds++;
+  await diceAndDraw('player');
+  if (S.over) return;
+  S.busy = false;   // 摸牌完成，进入出牌阶段
+  render();
+  maybeStartGuide();   // 首次游戏的新手引导（只显示一次）
+}
+
+function startTurn(side, first=false){
+  S.turn = side; S.played = 0; S.needPlay = CONFIG.plays;
+  S.selCard = null; S.selItem = null;
+  S.forcedDiscard = 0;
+  // 后勤强化：从获得的下个回合起，生效 3 个回合
+  if (S.bonusLeft[side] > 0) {
+    S.bonusLeft[side]--;
+    S.bonusOn[side] = true;
+    if (S.bonusLeft[side] === 0) log('sys', `🎲 ${SIDE_NAME[side]}的【后勤强化】本回合结束后失效`);
+  } else {
+    S.bonusOn[side] = false;
+  }
+  S.busy = (side === 'ai');   // 玩家回合解锁操作，电脑回合锁定
+  if (side==='player') {
+    S.revealAi = false;   // 侦察效果持续一个对方回合后消失
+    S.discarded = false;  // 每回合重置弃牌次数
+    S.rareOpen = null; S.rareSel = [];
+    exitDiscardMode();
+    if (!first) { log('sys','—— 轮到你了 ——'); sfx('turn'); }
+    armTurnTimer();   // 联机：开启回合计时
+  }
+  render();
+}
+
+/* ================= 电脑 AI ================= */
+async function aiTurn(){
+  startTurn('ai');
+  S.busy = true; render();
+  await sleep(400);
+  await diceAndDraw('ai');   // 回合开始：掷骰摸牌
+  if (S.over) return;
+  await sleep(400);
+
+  // --- 先用道具（简单难度：不用道具、不开稀有箱） ---
+  const has = k => S.items.ai.indexOf(k);
+  const hard = difficulty==='hard';
+  if (difficulty!=='easy') {
+  // 增援：兵力劣势时
+  if (has('reinforce')>=0 && countSoldiers('ai')<=3) {
+    S.items.ai.splice(has('reinforce'),1);
+    const ri = doReinforce('ai');
+    render();
+    if (typeof ri === 'number') playSummonFx([ri]);
+    await sleep(typeof ri === 'number' ? 1200 : 600);
+  }
+  // 困难 AI：侦察——直接看玩家手牌，精准判断威胁
+  if (hard && has('scout')>=0) {
+    S.items.ai.splice(has('scout'),1);
+    log('ai','🔭 电脑使用了侦察，它看清了你的手牌！');
+    render(); await sleep(600);
+  }
+  // 护盾：普通=士兵≤3时随机套；困难=精准套给被威胁最大的士兵
+  if (has('shield')>=0) {
+    const cand = S.cells.filter(c=>c.soldier==='ai' && !c.shield);
+    let target = null;
+    if (hard && cand.length) {
+      target = mostThreatened(cand);   // 记牌推算 + 侦察实看
+    } else if (!hard && countSoldiers('ai')<=3 && cand.length) {
+      target = cand[rand(cand.length)];
+    }
+    if (target) {
+      S.items.ai.splice(has('shield'),1);
+      target.shield = true;
+      log('ai', hard
+        ? `🧠 电脑算计过后，给 (${target.r+1},${target.c+1}) 的士兵精准套上护盾`
+        : `🛡 电脑给 (${target.r+1},${target.c+1}) 的士兵套上护盾`);
+      render(); await sleep(600);
+    }
+  }
+  // 弹药补给：普通=3 次有效攻击才用；困难=2 次就用
+  if (has('ammo')>=0 && countHits('ai') >= (hard?2:3)) {
+    S.items.ai.splice(has('ammo'),1); S.needPlay++;
+    log('ai',`⚡ 电脑使用了弹药补给，本回合打出 ${S.needPlay} 张牌！`); render(); await sleep(600);
+  }
+  // 连环雷：若存在能波及 ≥2 名玩家士兵的炸点（困难：绝不误伤自己人）
+  if (has('chain')>=0) {
+    const spot = bestChainSpot(hard);
+    if (spot!==null) {
+      S.items.ai.splice(has('chain'),1); S.chainNext.ai = true;
+      log('ai','💣 电脑部署了连环雷…'); render(); await sleep(600);
+    }
+  }
+
+  // 变废为宝：手牌少且无可出的牌时全换
+  if (has('desperate')>=0 && S.hand.ai.length>0 && S.hand.ai.length<=2
+      && !S.hand.ai.some(v => S.cells.some(c=>!c.rareItem && c.value===v))) {
+    S.items.ai.splice(has('desperate'),1);
+    const n = S.hand.ai.length;
+    S.hand.ai = Array.from({length:n}, ()=>1+rand(6));
+    log('ai', `🔥 电脑变废为宝，弃掉全部手牌重抽 ${n} 张！`);
+    render(); await sleep(600);
+  }
+  // 身先士卒：兵力领先且手牌差时，牺牲一名士兵抽 2 张
+  if (has('sacrifice')>=0 && countSoldiers('ai') > countSoldiers('player') && S.hand.ai.length<=2) {
+    const cand = S.cells.filter(c=>c.soldier==='ai' && !c.shield);
+    const pool = cand.length ? cand : S.cells.filter(c=>c.soldier==='ai');
+    if (pool.length && countSoldiers('ai') > 1) {
+      const victim = pool[rand(pool.length)];
+      S.items.ai.splice(has('sacrifice'),1);
+      victim.soldier = null; victim.shield = false; victim.crater = true;
+      S.hand.ai.push(1+rand(6), 1+rand(6));
+      S.needPlay++;   // 与玩家规则一致：本回合多一次出牌
+      sfx('explosion');
+      log('ai', `🗡 电脑牺牲了 (${victim.r+1},${victim.c+1}) 的士兵，抽取 2 张牌，本回合出牌次数 +1！`);
+      render(); await sleep(600);
+    }
+  }
+
+  // 困难 AI：移型换位——当手牌打不到玩家士兵时，把玩家士兵拖到手牌点数的空格上制造击杀
+  if (hard && has('swap')>=0 && !directHits('ai').length) {
+    const ps = S.cells.filter(c=>c.soldier==='player');
+    let moved = false;
+    for (const v of S.hand.ai) {
+      const dest = S.cells.find(c=>!c.soldier && !c.item && !c.rareItem && !c.crater && c.value===v);
+      if (dest && ps.length) {
+        const victim = ps[rand(ps.length)];
+        S.items.ai.splice(has('swap'),1);
+        dest.soldier = 'player'; dest.shield = victim.shield;
+        victim.soldier = null; victim.shield = false;
+        sfx('summon');
+        log('ai', `🌀 电脑把你的士兵从 (${victim.r+1},${victim.c+1}) 拖到了 (${dest.r+1},${dest.c+1})！`);
+        render(); await sleep(800);
+        moved = true; break;
+      }
+    }
+  }
+
+  // 困难 AI：有精准制导且场上有稀有箱 → 直接解锁（与玩家规则一致）
+  if (hard && has('guided')>=0) {
+    const rc = S.cells.find(c=>c.rareItem);
+    if (rc) {
+      S.items.ai.splice(has('guided'),1);
+      const key = rc.rareItem;
+      rc.rareItem = null; rc.rareTarget = null; rc.crater = true;
+      S.stats.rares.ai++;
+      sfx('pickup');
+      log('ai', `🎯 电脑用精准制导直接解锁了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
+      const gSummoned = applyRareItem('ai', key);
+      render(); playSummonFx(gSummoned); await sleep(gSummoned.length ? 1800 : 900);
+      if (checkOver()) return;
+    }
+  }
+
+  // 稀有道具箱：手牌中有两张点数和正好等于目标点数的组合就开
+  const rareCell = S.cells.find(c=>c.rareItem);
+  if (rareCell && !S.over) {
+    const pair = findPair(S.hand.ai, rareCell.rareTarget);
+    if (pair) {
+      const sum = S.hand.ai[pair[0]] + S.hand.ai[pair[1]];
+      pair.slice().sort((a,b)=>b-a).forEach(x=>S.hand.ai.splice(x,1));
+      const key = rareCell.rareItem;
+      rareCell.rareItem = null; rareCell.rareTarget = null; rareCell.crater = true;
+      S.played++;   // 开箱消耗 1 次出牌次数（与玩家规则一致）
+      S.stats.rares.ai++;
+      sfx('pickup');
+      log('ai', `✨ 电脑用点数和 ${sum} 开启了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
+      const aiSummoned = applyRareItem('ai', key);
+      render(); playSummonFx(aiSummoned); await sleep(aiSummoned.length ? 1800 : 900);
+    }
+  }
+  } // end if (difficulty!=='easy')
+
+  // --- 出牌 ---
+  while (S.played < S.needPlay) {
+    if (checkOver()) return;
+    if (!S.hand.ai.length) {   // 手牌打空，提前结束回合
+      log('ai','🤖 电脑手牌已空，提前结束回合'); break;
+    }
+    const move = aiPickMove();
+    if (!move) {
+      log('ai','🤖 电脑无牌可出，跳过了出牌'); break;
+    }
+    await playCardAI(move.cardIdx, move.targetIdx);
+    if (checkOver()) return;   // 最后一张牌击杀也要结算胜负
+  }
+  if (checkOver()) return;     // 循环结束后再兜底检查一次
+
+  // 回合结束：手牌超过 5 张则自动弃掉最没用的牌（场上对应格子最少的点数）
+  while (S.hand.ai.length > 5) {
+    let worst = 0, worstCnt = 99;
+    S.hand.ai.forEach((v,i) => {
+      const cnt = S.cells.filter(c=>!c.rareItem && !c.crater && c.value===v).length;
+      if (cnt < worstCnt) { worstCnt = cnt; worst = i; }
+    });
+    const dv = S.hand.ai.splice(worst,1)[0];
+    log('ai', `🗑 电脑手牌超限，弃掉了 ${dv} 点牌（回合结束手牌需 ≤5 张）`);
+  }
+
+  await sleep(400);
+  S.busy = false;
+  beginPlayerTurn();   // 电脑行动完毕，轮到玩家（回合开始掷骰摸牌）
+}
+
+// 找出所有"能直接命中玩家士兵"的 (cardIdx, targetIdx)
+function directHits(side){
+  const enemy = side==='ai' ? 'player' : 'ai';
+  const hits = [];
+  S.hand[side].forEach((v,ci) => {
+    S.cells.forEach(cell => {
+      if (cell.value===v && cell.soldier===enemy) hits.push({cardIdx:ci, targetIdx:cell.idx, score:100});
+    });
+  });
+  return hits;
+}
+function countHits(side){ return directHits(side).length; }
+
+// 找两张点数和正好等于 target 的牌（开稀有箱用）
+function findPair(hand, target){
+  for (let i=0;i<hand.length;i++) for (let j=i+1;j<hand.length;j++){
+    if (hand[i]+hand[j] === target) return [i,j];
+  }
+  return null;
+}
+
+function bestChainSpot(avoidFriendly=false){
+  // 找一个格子：其十字范围内玩家士兵 ≥2，且 AI 手牌能打到它
+  let best=null, bestN=1;
+  S.cells.forEach(cell=>{
+    const around=[cell.idx, cell.r>0?cell.idx-6:-1, cell.r<5?cell.idx+6:-1, cell.c>0?cell.idx-1:-1, cell.c<5?cell.idx+1:-1];
+    const n = around.filter(i=>i>=0 && S.cells[i].soldier==='player').length;
+    const friendly = around.some(i=>i>=0 && S.cells[i].soldier==='ai');
+    if (avoidFriendly && friendly) return;   // 困难 AI 不误伤自己人
+    if (n>bestN && S.hand.ai.includes(cell.value)) { bestN=n; best=cell.idx; }
+  });
+  return best;
+}
+
+// 困难 AI 记牌：推算玩家手牌点数分布，选出最被威胁的己方士兵
+function mostThreatened(cells){
+  // 某点数被玩家打出/弃掉的次数越多，推算玩家越可能还持有该点数
+  const threat = v => 1 + S.playedCards.filter(c=>c===v).length * 0.6;
+  let best = cells[0], bestT = -1;
+  cells.forEach(cell=>{
+    const t = threat(cell.value);
+    if (t > bestT) { bestT = t; best = cell; }
+  });
+  return best;
+}
+
+function aiPickMove(){
+  if (!S.hand.ai.length) return null;   // 没牌了
+  // ===== 简单难度：完全随机（但也不能直接打自己士兵） =====
+  if (difficulty==='easy') {
+    const ci = rand(S.hand.ai.length);
+    const v = S.hand.ai[ci];
+    const cells = S.cells.filter(c=>c.value===v && c.soldier!=='ai');
+    if (!cells.length) return null;
+    return {cardIdx:ci, targetIdx:cells[rand(cells.length)].idx};
+  }
+  const hard = difficulty==='hard';
+
+  // 1. 直接命中玩家士兵
+  let hits = directHits('ai');
+  if (S.chainNext.ai) {
+    const spot = bestChainSpot(hard);
+    if (spot!==null) {
+      const ci = S.hand.ai.indexOf(S.cells[spot].value);
+      if (ci>=0) return {cardIdx:ci, targetIdx:spot};
+    }
+  }
+  if (hits.length) return hits[rand(hits.length)];
+
+  // 2. 精准制导：有道具且有士兵可打时启用
+  const gi = S.items.ai.indexOf('guided');
+  if (gi>=0 && S.hand.ai.length) {
+    const ps = S.cells.filter(c=>c.soldier==='player');
+    if (ps.length) {
+      S.items.ai.splice(gi,1); S.guidedNext.ai = true;
+      log('ai','🎯 电脑启动了精准制导！');
+      return {cardIdx:rand(S.hand.ai.length), targetIdx:ps[rand(ps.length)].idx};
+    }
+  }
+
+  // 3. 打补给箱
+  const picks = [];
+  S.hand.ai.forEach((v,ci)=>{
+    S.cells.forEach(cell=>{
+      if (cell.value===v && cell.item && !cell.crater) picks.push({cardIdx:ci, targetIdx:cell.idx, score:50});
+    });
+  });
+  if (picks.length) return picks[rand(picks.length)];
+
+  // 4. 随便打（优先没炸过的格子；任何难度都不能直接打自己士兵，溅射另算）
+  const order = S.hand.ai.map((v,ci)=>ci).sort(()=>Math.random()-.5);
+  for (const ci of order) {
+    const v = S.hand.ai[ci];
+    const cells = S.cells.filter(c=>c.value===v && c.soldier!=='ai' && !c.rareItem);
+    if (!cells.length) continue;
+    const fresh = cells.filter(c=>!c.crater);
+    const pool = fresh.length ? fresh : cells;
+    return {cardIdx:ci, targetIdx:pool[rand(pool.length)].idx};
+  }
+  return null;   // 可打的格子全是自己士兵，放弃出牌
+}
+
+async function playCardAI(cardIdx, targetIdx){
+  // 复用 playCard 的流程，但带 AI 节奏
+  const cardEl = $('aiHand').children[cardIdx];
+  const card = S.hand.ai[cardIdx];
+  if (card === undefined || targetIdx === undefined || !S.cells[targetIdx]) return;  // 防御：非法出牌直接跳过
+  S.hand.ai.splice(cardIdx,1);
+  const guided = S.guidedNext.ai; S.guidedNext.ai = false;
+  const chain = S.chainNext.ai;  S.chainNext.ai = false;
+
+  log('ai', `🤖 电脑打出 ${card} 点牌${guided?' 🎯':''}${chain?' 💣':''}…`);
+  sfx('card'); sfx('cannon');
+  flyShellTo(targetIdx, cardEl);
+  render(); await sleep(700);
+
+  const targets = [targetIdx];
+  if (chain) {
+    const {r,c} = S.cells[targetIdx];
+    [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].forEach(([rr,cc])=>{
+      if (rr>=0&&rr<6&&cc>=0&&cc<6) targets.push(rr*6+cc);
+    });
+  }
+  for (const ti of targets) resolveHit('ai', ti);
+  S.played++;
+  render(); flushCellFx();
+  await sleep(650);
+}
+
+/* ================= 胜负 ================= */
+function checkOver(){
+  const p = countSoldiers('player'), a = countSoldiers('ai');
+  if (p>0 && a>0) return false;
+  endGame(p, a, 'elim');
+  return true;
+}
+
+/* 无空地结算：地图被占满时按剩余兵力判定胜负 */
+function noSpaceEnd(){
+  const p = countSoldiers('player'), a = countSoldiers('ai');
+  log('sys', `🏁 地图上没有空地了！按剩余兵力结算：你 ${p} : ${a} ${SIDE_NAME.ai}`);
+  endGame(p, a, 'nospace');
+}
+
+/* 游戏结束：记录结局并展示结算（联机时同步给对手） */
+function endGame(p, a, kind){
+  S.over = true; S.busy = false;
+  stopTurnTimer();
+  S.endInfo = { p, a, kind };   // 本地视角结局，联机同步用
+  render();
+  showEndOverlay(p, a, kind, true);
+  netSync();
+}
+
+/* 统一结算画面（p/a 为本地视角剩余士兵，kind: 'elim' | 'nospace'） */
+function showEndOverlay(p, a, kind, isLocal=true){
+  let icon, title, sub, draw = false;
+  if (kind === 'elim') {
+    const win = a===0 && p>0; draw = p===0 && a===0;
+    icon  = win ? '🏆' : (draw ? '⚔️' : '💀');
+    title = win ? '你赢了！' : (draw ? '同归于尽！' : '全军覆没…');
+    sub   = win ? '干净利落，全场最佳炮兵！' : (draw ? '两败俱伤，谁也没占到便宜' : '胜败乃兵家常事，再来一局！');
+  } else if (kind === 'nospace') {
+    const win = p > a; draw = p === a;
+    icon  = win ? '🏆' : (draw ? '⚖️' : '💀');
+    title = win ? '你赢了！' : (draw ? '势均力敌！' : '兵力告负…');
+    sub   = `地图已被完全填满，按剩余兵力判定胜负（你 ${p} : ${a} ${SIDE_NAME.ai}）`;
+  } else {   // surrender：isLocal=true 表示本方是投降方
+    const win = !isLocal;
+    icon  = win ? '🏆' : '🏳';
+    title = win ? '对手投降，你赢了！' : '你投降了…';
+    sub   = win ? '不战而屈人之兵，善之善者也' : '胜败乃兵家常事，调整后再来！';
+  }
+  const win = title.includes('赢');
+  recordResult(win, draw);
+  // 生成战绩分享卡所需的数据
+  LAST_END = {
+    icon, title, p, a,
+    kills: S.stats.kills.player,
+    rounds: S.stats.rounds,
+    mmss: `${Math.floor(Math.max(1,Math.floor((Date.now()-S.stats.start)/1000))/60)}分${String(Math.max(1,Math.floor((Date.now()-S.stats.start)/1000))%60).padStart(2,'0')}秒`,
+    mode: NET.on ? '联机对战' : '人机 · ' + DIFF_NAMES[difficulty],
+  };
+  sfx(win ? 'win' : 'lose');
+  $('overIcon').textContent = icon;
+  $('overText').textContent = title;
+  $('overText').style.color = win ? '#8fe3a8' : '#ff9a8a';
+  $('overSub').textContent = sub;
+
+  // 对局统计
+  const st = S.stats;
+  const dur = Math.max(1, Math.floor((Date.now()-st.start)/1000));
+  const mmss = `${Math.floor(dur/60)}分${String(dur%60).padStart(2,'0')}秒`;
+  const rows = [
+    ['💥 击杀数',      st.kills.player, st.kills.ai],
+    ['📦 拾取道具',    st.items.player, st.items.ai],
+    ['✨ 稀有宝箱',    st.rares.player, st.rares.ai],
+    ['🪖 剩余士兵',    p,               a],
+  ];
+  $('overStats').innerHTML = `
+    <table class="statTb">
+      <tr><th></th><th>🪖 你</th><th>${NET.on?'🎮':'🤖'} ${SIDE_NAME.ai}</th></tr>
+      ${rows.map(r=>`<tr><td>${r[0]}</td>
+        <td class="${r[1]>r[2]?'win':''}">${r[1]}</td>
+        <td class="${r[2]>r[1]?'win':''}">${r[2]}</td></tr>`).join('')}
+    </table>
+    <div class="overMeta">回合数 ${st.rounds} ｜ 用时 ${mmss} ｜ ${NET.on ? '联机对战' : '难度 '+DIFF_NAMES[difficulty]}</div>
+    <div class="overMeta">${recText()}</div>`;
+
+  setTimeout(()=>$('overlay').classList.add('show'), 900);
+  log('sys', `${icon} ${title}`);
+}
+
+/* ================= 联机网络层 ================= */
+/* 视角转换：双方都以自己的视角存状态（自己永远是 'player'），收到对方状态后整体翻转 */
+function swapState(src){
+  const c = JSON.parse(JSON.stringify(src));
+  [c.hand.player, c.hand.ai]           = [c.hand.ai, c.hand.player];
+  [c.items.player, c.items.ai]         = [c.items.ai, c.items.player];
+  [c.drawBonus.player, c.drawBonus.ai] = [c.drawBonus.ai, c.drawBonus.player];
+  [c.bonusLeft.player, c.bonusLeft.ai] = [c.bonusLeft.ai, c.bonusLeft.player];
+  [c.bonusOn.player, c.bonusOn.ai]     = [c.bonusOn.ai, c.bonusOn.player];
+  c.forcedDiscard = 0;
+  [c.guidedNext.player, c.guidedNext.ai] = [c.guidedNext.ai, c.guidedNext.player];
+  [c.chainNext.player, c.chainNext.ai]   = [c.chainNext.ai, c.chainNext.player];
+  ['kills','items','rares'].forEach(k => { const t = c.stats[k]; [t.player, t.ai] = [t.ai, t.player]; });
+  c.cells.forEach(cell => { if (cell.soldier) cell.soldier = cell.soldier==='player' ? 'ai' : 'player'; });
+  c.turn = c.turn==='player' ? 'ai' : 'player';
+  // 瞬态/选择态不继承
+  c.selCard = c.selItem = c.rareOpen = null;
+  c.rareSel = []; c.discardSel = []; c.discardMode = false;
+  c.swapSrc = null;
+  c.revealAi = false;
+  c.busy = (c.turn === 'ai');
+  return c;
+}
+
+/* 同步当前状态给对手（只在动作点显式调用，绝不放进 render，防止收发乒乓） */
+function netSync(){
+  if (!NET.on || !NET.conn || !NET.conn.open) return;
+  const fx = FXQ.slice(); FXQ.length = 0;
+  NET.conn.send({ t:'state', S, logs: LOGS, cfg: CONFIG, fx });
+}
+
+/* ================= 联机回合倒计时 ================= */
+const TURN_SECONDS = 75;
+let turnTimerInt = null, turnDeadline = 0;
+function armTurnTimer(){
+  stopTurnTimer();
+  if (!NET.on || S.over) return;
+  turnDeadline = Date.now() + TURN_SECONDS*1000;
+  $('turnTimer').style.display = '';
+  turnTimerInt = setInterval(() => {
+    const left = Math.max(0, turnDeadline - Date.now());
+    const f = $('turnTimerFill');
+    f.style.width = (left/(TURN_SECONDS*1000)*100) + '%';
+    f.style.background = left < 15000 ? '#ff7a6b' : '#7fd4ff';
+    if (left <= 0) { stopTurnTimer(); autoTimeoutEnd(); }
+  }, 250);
+}
+function stopTurnTimer(){
+  clearInterval(turnTimerInt); turnTimerInt = null;
+  const t = $('turnTimer'); if (t) t.style.display = 'none';
+}
+function autoTimeoutEnd(){
+  if (S.over || S.turn !== 'player') return;
+  while (S.hand.player.length > 5) {   // 超时同样要遵守回合末 ≤5 张
+    const i = rand(S.hand.player.length);
+    const v = S.hand.player.splice(i,1)[0];
+    S.playedCards.push(v);
+    log('me', `⏰ 回合超时，随机弃掉 ${v} 点牌`);
+  }
+  exitDiscardMode();
+  toast('⏰ 回合超时，自动结束回合');
+  log('me', '⏰ 你的回合超时，自动结束');
+  endTurn();
+}
+
+/* 回合结束分发器：联机 → 交接给对方；人机 → 电脑行动 */
+function endTurn(){
+  // 手牌超过 5 张：先强制弃牌，弃完再继续结束回合
+  if (S.turn === 'player' && !S.over && S.hand.player.length > 5) {
+    enterForcedDiscard();
+    return;
+  }
+  stopTurnTimer();
+  if (NET.on) {
+    S.turn = 'ai'; S.busy = true;
+    exitDiscardMode();
+    render();
+    netSync();
+  } else {
+    aiTurn();
+  }
+}
+
+/* 收到对方数据 */
+function onNetData(d){
+  if (!d || typeof d !== 'object') return;
+  if (d.t === 'restart') {   // 对方请求再来一局（由主机重开）
+    if (NET.isHost) { $('overlay').classList.remove('show'); initGame(); }
+    return;
+  }
+  if (d.t === 'emote') {   // 对方发来的快捷表情
+    showEmote(d.e, d.txt, false);
+    return;
+  }
+  if (d.t === 'cfg') {   // 主机改了配置：客人只读同步
+    Object.assign(CONFIG, d.cfg);
+    Object.keys(CFG_LABEL).forEach(k => $(CFG_LABEL[k]).textContent = CONFIG[k]);
+    document.querySelectorAll('#cfgDiff button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.difficulty));
+    return;
+  }
+  if (d.t !== 'state' || !d.S) return;
+  if (d.cfg) Object.assign(CONFIG, d.cfg);   // 以主机配置为准
+  const hadS = !!S;
+  const wasMyTurn = hadS && !S.over && S.turn === 'player';
+  S = swapState(d.S);
+  // 日志：对方视角的记录转换为我的视角
+  LOGS.length = 0;
+  (d.logs || []).forEach(e => {
+    LOGS.push({
+      side: e.side==='player' ? 'ai' : (e.side==='ai' ? 'player' : 'sys'),
+      msg: swapNames(e.msg),
+    });
+  });
+  renderLogs();
+  if (!hadS) $('setup').classList.add('hide');   // 首次同步 = 主机已开局
+  if (S.over) {
+    render();
+    const ei = S.endInfo || { p:countSoldiers('ai'), a:countSoldiers('player'), kind:'elim' };
+    showEndOverlay(ei.a, ei.p, ei.kind, false);   // endInfo 是对方视角，翻转成本地视角（投降方在对面）
+    return;
+  }
+  $('overlay').classList.remove('show');
+  render();
+  if (Array.isArray(d.fx)) {   // 播放对方操作时的音效，爆炸时同步震屏
+    d.fx.forEach(playSound);
+    if (d.fx.includes('explosion')) shakeMap();
+  }
+  if (S.turn === 'player' && !wasMyTurn) beginPlayerTurn();   // 轮到我：掷骰摸牌
+}
+
+function setNetStatus(msg, cls){
+  const el = $('netStatus');
+  el.textContent = msg;
+  el.className = cls || '';
+}
+/* 联机错误分类提示 + 显示重试按钮 */
+function netErrMsg(t){
+  switch (t) {
+    case 'peer-unavailable': return '❌ 房间不存在或已关闭，请确认房间码（或让朋友重建）';
+    case 'network': case 'server-error': case 'socket-error': case 'socket-closed':
+      return '❌ 信令服务器连接失败（公共云服务不稳定），请重试';
+    case 'browser-incompatible': return '❌ 当前浏览器不支持 WebRTC，请换 Chrome / Edge / Safari';
+    default: return '❌ 连接错误：' + t;
+  }
+}
+function netFail(msg){
+  setNetStatus(msg, 'warn');
+  $('btnNetRetry').style.display = '';
+}
+function applyNetNames(){
+  $('aArmyLabel').textContent = NET.on ? '🎮 对手士兵' : '🤖 电脑士兵';
+  $('btnEmote').style.display = NET.on ? '' : 'none';
+  if (!NET.on) $('emoteBar').style.display = 'none';
+}
+function cleanupNet(){
+  clearTimeout(NET.timer); NET.timer = null;
+  if (NET.conn) { try { NET.conn.close(); } catch(e){} }
+  if (NET.peer) { try { NET.peer.destroy(); } catch(e){} }
+  NET.conn = null; NET.peer = null;
+}
+function leaveOnline(){
+  NET.on = false; NET.isHost = false; NET.code = '';
+  stopTurnTimer();
+  cleanupNet();
+  SIDE_NAME.ai = '电脑'; applyNetNames();
+  $('btnStart').style.display = '';
+  $('btnNetRetry').style.display = 'none';
+  $('btnCopyCode').style.display = 'none';
+  $('setupBox').classList.remove('guestView');
+  setNetStatus('创建房间后，把房间码发给好友');
+}
+function onPeerLost(){
+  if (!NET.on) return;
+  toast('🔌 对手已断开连接');
+  setTimeout(showSetup, 1200);
+}
+
+/* 主机：创建房间，id = spw6-房间码 */
+function hostRoom(){
+  leaveOnline();
+  NET.isHost = true;
+  const code = String(1000 + Math.floor(Math.random()*9000));
+  NET.code = code;
+  setNetStatus('正在连接信令服务器…');
+  NET.peer = new Peer('spw6-' + code, PEER_CONFIG);
+  NET.timer = setTimeout(() => {
+    if (NET.peer && !NET.peer.open) netFail('❌ 连接信令服务器超时（公共云服务不稳定），请重试');
+  }, 12000);
+  NET.peer.on('open', () => {
+    clearTimeout(NET.timer); NET.timer = null;
+    $('btnCopyCode').style.display = '';
+    setNetStatus(`房间已创建！房间码：${code}，发给好友等待加入…`, 'ok');
+  });
+  NET.peer.on('connection', conn => {
+    if (NET.conn) { try { conn.close(); } catch(e){} return; }   // 只接受一名对手
+    NET.conn = conn;
+    conn.on('open', () => {
+      NET.on = true; SIDE_NAME.ai = '对手'; applyNetNames();
+      $('btnNetRetry').style.display = 'none';
+      setNetStatus('✅ 好友已加入！点击「开始战斗」开局', 'ok');
+    });
+    conn.on('data', onNetData);
+    conn.on('close', onPeerLost);
+    conn.on('iceStateChanged', st => {
+      if (st === 'failed') netFail('❌ 网络穿透失败：双方网络无法直连（试试都改用 WiFi，或换个房间码重建）');
+    });
+  });
+  NET.peer.on('error', e => {
+    if (e.type === 'unavailable-id') { hostRoom(); return; }   // 房间码撞车，自动换一个
+    netFail(netErrMsg(e.type));
+  });
+}
+
+/* 客人：按房间码加入 */
+function joinRoom(code){
+  leaveOnline();
+  NET.isHost = false;
+  NET.code = code;
+  setNetStatus('正在连接信令服务器…');
+  NET.peer = new Peer(PEER_CONFIG);
+  NET.peer.on('open', () => {
+    setNetStatus('正在加入房间 ' + code + ' …');
+    const conn = NET.peer.connect('spw6-' + code, { reliable:true });
+    NET.conn = conn;
+    NET.timer = setTimeout(() => {
+      if (!conn.open) netFail('❌ 连接超时：网络穿透失败（试试换 WiFi，或让朋友重建房间）');
+    }, 12000);
+    conn.on('open', () => {
+      clearTimeout(NET.timer); NET.timer = null;
+      NET.on = true; SIDE_NAME.ai = '对手'; applyNetNames();
+      $('btnNetRetry').style.display = 'none';
+      setNetStatus('✅ 已连接！等待主机开始战斗…（配置由主机决定）', 'ok');
+      $('btnStart').style.display = 'none';
+      $('setupBox').classList.add('guestView');   // 配置只读
+    });
+    conn.on('data', onNetData);
+    conn.on('close', onPeerLost);
+    conn.on('iceStateChanged', st => {
+      if (st === 'failed') {
+        clearTimeout(NET.timer); NET.timer = null;
+        netFail('❌ 网络穿透失败：你或朋友的网络不支持直连（试试都连 WiFi）');
+      }
+    });
+  });
+  NET.peer.on('error', e => netFail(netErrMsg(e.type)));
+}
+
+/* 结算「再来一局」：联机时只有主机能直接重开，客人发请求 */
+function onAgainClick(){
+  if (!NET.on) { initGame(); return; }
+  if (NET.isHost) { initGame(); return; }
+  if (NET.conn && NET.conn.open) { NET.conn.send({ t:'restart' }); toast('✉️ 已向主机发送再来一局请求'); }
+}
+
+/* ================= 战绩分享卡 ================= */
+let LAST_END = null;
+const SHARE_QUOTES = {
+  win: [
+    '对面士兵已集体提交辞呈，理由：老板太猛。',
+    '这一炮二十年的功力，你拿什么挡？',
+    '不是我太强，是棋盘太小，对面没地方跑。',
+    '胜之不武？这叫兵不厌诈，懂不懂。',
+    '刚睡醒随手赢了一局，一般般吧。',
+    '建议对面下载反诈 App，因为这局被骗惨了。',
+    '打完这局，我给自己的评价是：有点东西。',
+  ],
+  lose: [
+    '输了游戏，赢了风度。好吧主要是输了。',
+    '战术性让局，下一把开始认真。',
+    '我的士兵用行动演绎了《论优雅阵亡》。',
+    '别问，问就是信号不好。',
+    '棋盘太小施展不开，建议换成 60×60。',
+    '这局是教学局：我负责教，对面负责学。',
+  ],
+  draw: [
+    '平局：棋盘对我们俩的一致差评。',
+    '打到弹尽粮绝，谁也没赢，但观众赢了。',
+    '这局证明了：卧龙凤雏，总是成双出现。',
+    '两败俱伤？不，是英雄惜英雄。',
+  ],
+};
+function wrapCanvasText(x, text, maxW){
+  const lines = []; let line = '';
+  for (const ch of text) {
+    if (x.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
+    else line += ch;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function drawShareCard(d){
+  const W = 600, H = 880;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  const F = '"PingFang SC","Microsoft YaHei",sans-serif';
+  const rr = (px,py,w,h,r)=>{ x.beginPath(); x.moveTo(px+r,py); x.arcTo(px+w,py,px+w,py+h,r); x.arcTo(px+w,py+h,px,py+h,r); x.arcTo(px,py+h,px,py,r); x.arcTo(px,py,px+w,py,r); x.closePath(); };
+
+  // 背景 + 细网格
+  const g = x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#14202e'); g.addColorStop(1,'#0a1018');
+  x.fillStyle = g; x.fillRect(0,0,W,H);
+  x.strokeStyle = 'rgba(127,212,255,.05)'; x.lineWidth = 1;
+  for (let i=20;i<W;i+=40){ x.beginPath(); x.moveTo(i,0); x.lineTo(i,H); x.stroke(); }
+  for (let i=20;i<H;i+=40){ x.beginPath(); x.moveTo(0,i); x.lineTo(W,i); x.stroke(); }
+  // 金边
+  x.strokeStyle = 'rgba(255,210,127,.85)'; x.lineWidth = 3; rr(14,14,W-28,H-28,18); x.stroke();
+  x.strokeStyle = 'rgba(255,210,127,.25)'; x.lineWidth = 1; rr(22,22,W-44,H-44,14); x.stroke();
+
+  x.textAlign = 'center';
+  // 标题
+  x.fillStyle = '#ffd27f'; x.font = `bold 42px ${F}`;
+  x.fillText('六 点 战 场', W/2, 78);
+  x.fillStyle = '#8fa0b3'; x.font = `15px ${F}`;
+  x.fillText('6×6 卡牌炮击 · 双人对战', W/2, 108);
+  // 结果图标 + 标题
+  x.font = '84px serif'; x.fillText(d.icon, W/2, 225);
+  const resColor = d.icon==='🏆' ? '#8fe3a8' : (d.icon==='💀'||d.icon==='🏳' ? '#ff9a8a' : '#ffd27f');
+  x.fillStyle = resColor; x.font = `bold 40px ${F}`;
+  x.fillText(d.title, W/2, 295);
+  // 分隔线
+  x.strokeStyle = 'rgba(255,255,255,.12)'; x.beginPath(); x.moveTo(90,330); x.lineTo(W-90,330); x.stroke();
+
+  // 四项数据 2×2
+  const stats = [
+    ['💥 击杀数', String(d.kills)],
+    ['🪖 剩余士兵', `${d.p} : ${d.a}`],
+    ['🔁 回合数', String(d.rounds)],
+    ['⏱ 用时', d.mmss],
+  ];
+  stats.forEach((s,i)=>{
+    const bx = 48 + (i%2)*262, by = 360 + Math.floor(i/2)*92;
+    x.fillStyle = 'rgba(255,255,255,.05)'; rr(bx,by,246,76,12); x.fill();
+    x.fillStyle = '#8fa0b3'; x.font = `14px ${F}`; x.fillText(s[0], bx+123, by+28);
+    x.fillStyle = '#e8eef5'; x.font = `bold 26px ${F}`; x.fillText(s[1], bx+123, by+60);
+  });
+
+  // 骚话区
+  const kind = d.icon==='🏆' ? 'win' : (d.icon==='💀'||d.icon==='🏳' ? 'lose' : 'draw');
+  const q = SHARE_QUOTES[kind][Math.floor(Math.random()*SHARE_QUOTES[kind].length)];
+  x.fillStyle = '#1c2634'; rr(48,556,W-96,110,14); x.fill();
+  x.fillStyle = '#ffd27f'; rr(48,556,5,110,3); x.fill();
+  x.fillStyle = '#e8eef5'; x.font = `italic 19px ${F}`;
+  const lines = wrapCanvasText(x, '「' + q + '」', W-160);
+  lines.forEach((ln,i)=> x.fillText(ln, W/2, 556 + 44 + i*28 + (lines.length===1?14:0)));
+  x.fillStyle = '#8fa0b3'; x.font = `13px ${F}`;
+  x.fillText('—— 战场骚话生成器', W/2, 556+98);
+
+  // 模式
+  x.fillStyle = '#8fa0b3'; x.font = `15px ${F}`;
+  x.fillText(`模式：${d.mode}`, W/2, 712);
+  // CTA
+  x.fillStyle = '#ffd27f'; x.font = `bold 24px ${F}`;
+  x.fillText('来一局？输了别哭 😏', W/2, 775);
+  x.fillStyle = '#6d7c8d'; x.font = `13px ${F}`;
+  x.fillText('转发这张卡，约你的下一个手下败将', W/2, 810);
+  x.fillText('六点战场 · 打开链接就能开战', W/2, 834);
+
+  return cv.toDataURL('image/png');
+}
+function showShareCard(){
+  if (!LAST_END) return;
+  const url = drawShareCard(LAST_END);
+  $('shareImg').src = url;
+  $('shareDl').href = url;
+  $('shareBox').classList.add('show');
+}
+
+/* ================= 本地战绩 ================= */
+function getRec(){ try { return JSON.parse(localStorage.getItem('spw_rec')||'{}'); } catch(e){ return {}; } }
+function saveRec(r){ try { localStorage.setItem('spw_rec', JSON.stringify(r)); } catch(e){} }
+function recordResult(win, draw){
+  const r = getRec();
+  r.games = (r.games||0) + 1;
+  if (win) r.wins = (r.wins||0) + 1;
+  if (draw) r.draws = (r.draws||0) + 1;
+  if (NET.on) { r.netGames = (r.netGames||0)+1; if (win) r.netWins = (r.netWins||0)+1; }
+  const k = S.stats.kills.player;
+  if (k > (r.bestKills||0)) r.bestKills = k;
+  saveRec(r);
+}
+function recText(){
+  const r = getRec();
+  if (!r.games) return '';
+  const losses = r.games - (r.wins||0) - (r.draws||0);
+  return `📈 历史战绩：${r.wins||0} 胜 ${losses} 负 ${r.draws||0} 平 ｜ 单场最高击杀 ${r.bestKills||0}`;
+}
+
+/* ================= 联机快捷表情 / 投降 ================= */
+$('btnEmote').onclick = () => {
+  const b = $('emoteBar');
+  b.style.display = b.style.display === 'none' ? 'flex' : 'none';
+};
+document.querySelectorAll('#emoteBar button').forEach(b => {
+  b.onclick = () => {
+    $('emoteBar').style.display = 'none';
+    if (b.dataset.e === '🏳') { surrenderGame(); return; }
+    showEmote(b.dataset.e, b.dataset.t, true);
+    if (NET.on && NET.conn && NET.conn.open) NET.conn.send({ t:'emote', e:b.dataset.e, txt:b.dataset.t });
+  };
+});
+function showEmote(e, t, mine){
+  const p = $('emotePop');
+  p.innerHTML = `<div class="eBig">${e}</div><div class="eTxt">${mine ? '你' : SIDE_NAME.ai}：${t}</div>`;
+  p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop');
+  playSound('turn');
+}
+function surrenderGame(){
+  if (!NET.on || S.over) return;
+  log('me', '🏳 你举起了白旗…');
+  endGame(countSoldiers('player'), countSoldiers('ai'), 'surrender');
+}
+
+/* ================= 新手引导（首次游戏显示一次） ================= */
+const GUIDE_STEPS = [
+  { sel:'#hand',       text:'① 点击一张手牌，选中它。' },
+  { sel:'#map',        text:'② 再点击地图上相同点数的格子开炮！命中敌兵即可击杀，炮击 📦 补给箱能获得道具。' },
+  { sel:'#btnEndTurn', text:'③ 出完牌点「结束回合」。先消灭对方全部士兵者胜，祝武运昌隆！' },
+];
+let guideStep = 0;
+function maybeStartGuide(){
+  try { if (localStorage.getItem('spw_guide_done')) return; } catch(e){ return; }
+  guideStep = 0;
+  showGuideStep();
+}
+function showGuideStep(){
+  const st = GUIDE_STEPS[guideStep];
+  const el = document.querySelector(st.sel);
+  if (!el) { endGuide(); return; }
+  document.querySelectorAll('.guideHi').forEach(x=>x.classList.remove('guideHi'));
+  el.classList.add('guideHi');
+  const pop = $('guidePop');
+  $('guideText').textContent = st.text;
+  $('guideNext').textContent = guideStep === GUIDE_STEPS.length-1 ? '开始战斗！' : '下一步';
+  pop.style.display = '';
+  const pw = Math.min(320, innerWidth - 24);
+  pop.style.width = pw + 'px';
+  pop.style.visibility = 'hidden';
+  requestAnimationFrame(()=>{
+    const r = el.getBoundingClientRect();
+    const ph = pop.offsetHeight;
+    let x = Math.max(12, Math.min(innerWidth - pw - 12, r.left + r.width/2 - pw/2));
+    let y = r.top - ph - 12;
+    if (y < 8) y = r.bottom + 12;
+    pop.style.left = x + 'px'; pop.style.top = y + 'px';
+    pop.style.visibility = '';
+  });
+}
+$('guideNext').onclick = () => {
+  guideStep++;
+  if (guideStep >= GUIDE_STEPS.length) endGuide(); else showGuideStep();
+};
+$('guideSkip').onclick = () => endGuide();
+function endGuide(){
+  $('guidePop').style.display = 'none';
+  document.querySelectorAll('.guideHi').forEach(x=>x.classList.remove('guideHi'));
+  try { localStorage.setItem('spw_guide_done','1'); } catch(e){}
+}
+
+/* ================= 开局配置 ================= */
+/* 主机改配置后实时同步给客人 */
+function sendCfg(){
+  if (NET.on && NET.isHost && NET.conn && NET.conn.open) NET.conn.send({ t:'cfg', cfg: CONFIG });
+}
+document.querySelectorAll('#cfgDiff button').forEach(b=>{
+  b.onclick = () => {
+    if ($('setupBox').classList.contains('guestView')) return;   // 客人只读
+    CONFIG.difficulty = b.dataset.v;
+    document.querySelectorAll('#cfgDiff button').forEach(x=>x.classList.toggle('on', x===b));
+    sendCfg();
+  };
+});
+document.querySelectorAll('.cfgStep button').forEach(b=>{
+  b.onclick = () => {
+    if ($('setupBox').classList.contains('guestView')) return;   // 客人只读
+    const k = b.dataset.k, [lo,hi] = CFG_RANGE[k];
+    CONFIG[k] = Math.max(lo, Math.min(hi, CONFIG[k] + (+b.dataset.d)));
+    $(CFG_LABEL[k]).textContent = CONFIG[k];
+    sendCfg();
+  };
+});
+/* 对战模式切换 */
+let netMode = 'ai', netRole = 'host';
+document.querySelectorAll('#cfgMode button').forEach(b=>{
+  b.onclick = () => {
+    netMode = b.dataset.v;
+    document.querySelectorAll('#cfgMode button').forEach(x=>x.classList.toggle('on', x===b));
+    $('netLobby').style.display = netMode==='net' ? '' : 'none';
+    $('diffRow').style.display  = netMode==='net' ? 'none' : '';
+    if (netMode==='ai') leaveOnline();
+  };
+});
+document.querySelectorAll('#cfgNetRole button').forEach(b=>{
+  b.onclick = () => {
+    netRole = b.dataset.v;
+    document.querySelectorAll('#cfgNetRole button').forEach(x=>x.classList.toggle('on', x===b));
+    $('roomCodeRow').style.display = netRole==='guest' ? '' : 'none';
+    $('btnNetGo').textContent = netRole==='guest' ? '🌐 加入房间' : '🌐 创建房间';
+    setNetStatus(netRole==='guest' ? '输入好友发来的 4 位房间码' : '创建房间后，把房间码发给好友');
+  };
+});
+$('btnNetGo').onclick = () => {
+  $('btnNetRetry').style.display = 'none';
+  if (netRole==='host') { hostRoom(); return; }
+  const code = $('roomCodeInput').value.trim();
+  if (!/^\d{4}$/.test(code)) { setNetStatus('请输入 4 位数字房间码', 'warn'); return; }
+  joinRoom(code);
+};
+/* 重试：主机自动换新房间码重建，客人按当前输入的房间码重连 */
+$('btnNetRetry').onclick = () => {
+  $('btnNetRetry').style.display = 'none';
+  $('btnNetGo').click();
+};
+$('btnCopyCode').onclick = async () => {
+  try { await navigator.clipboard.writeText(NET.code); toast('📋 房间码已复制：' + NET.code); }
+  catch(e){ toast('房间码：' + NET.code + '（请手动复制）'); }
+};
+$('btnStart').onclick = () => {
+  if (netMode==='net') {
+    if (!NET.isHost) { toast('等待主机开始战斗'); return; }
+    if (!NET.conn || !NET.conn.open) { setNetStatus('好友还未加入，先把房间码发给 TA', 'warn'); return; }
+  }
+  $('setup').classList.add('hide');
+  initGame();
+};
+function showSetup(){
+  if (NET.on) leaveOnline();
+  document.querySelectorAll('#cfgDiff button').forEach(x=>x.classList.toggle('on', x.dataset.v===CONFIG.difficulty));
+  Object.keys(CFG_LABEL).forEach(k => $(CFG_LABEL[k]).textContent = CONFIG[k]);
+  $('recLine').textContent = recText();
+  $('overlay').classList.remove('show');
+  $('setup').classList.remove('hide');
+}
+
+/* ================= 按钮 ================= */
+$('btnRestart').onclick = showSetup;
+$('btnSound').onclick = () => { soundOn = !soundOn; $('btnSound').textContent = soundOn ? '🔊' : '🔇'; };
+$('btnDiscard').onclick = () => {
+  if (S.over || S.busy || S.turn!=='player') return;
+  if (S.forcedDiscard > 0) { toast(`⚠️ 请点击手牌，弃掉 ${S.forcedDiscard} 张以结束回合`); return; }
+  if (S.discarded) { toast('本回合已经弃过牌了'); return; }
+  if (S.hand.player.length <= 2) { toast('手牌太少，不能弃牌'); return; }
+  if (S.discardMode) { exitDiscardMode(); render(); return; }
+  S.discardMode = true; S.discardSel = []; S.selCard = null; S.selItem = null;
+  S.rareOpen = null; S.rareSel = [];
+  $('btnDiscard').textContent = '取消弃牌';
+  $('btnDiscard').classList.add('discarding');
+  toast('🗑 点击 2 张要弃掉的牌，自动重抽 1 张');
+  render();
+};
+$('btnEndTurn').onclick = async () => {
+  if (S.over || S.busy || S.turn!=='player') return;
+  exitDiscardMode();
+  log('me', `➜ 你结束了回合（本回合打出 ${S.played} 张牌）`);
+  endTurn();
+};
+$('btnRules').onclick = () => $('rules').classList.add('show');
+$('rules').onclick = e => { if (e.target.id==='rules') $('rules').classList.remove('show'); };// 难度切换
+const DIFF_NAMES = { easy:'简单', normal:'普通', hard:'困难' };
+document.querySelectorAll('.diff').forEach(b=>{
+  b.onclick = () => {
+    difficulty = b.dataset.d;
+    CONFIG.difficulty = b.dataset.d;
+    document.querySelectorAll('.diff').forEach(x=>x.classList.toggle('active', x===b));
+    toast(`⚔️ 难度已切换：${DIFF_NAMES[difficulty]}（下个电脑回合生效）`);
+  };
+});
+
+// 不自动开局，先显示配置界面，点「开始战斗」后 initGame
+$('recLine').textContent = recText();
+</script>
+</body>
+</html>
