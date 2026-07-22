@@ -2545,12 +2545,12 @@ function renderStatsPanel(){
     .map(([k,o]) => `<tr><td>${itemName(k)}</td><td>${o.got}</td><td>${o.use}</td>
       <td>${o.got ? Math.round(100*o.use/o.got)+'%' : '—'}</td></tr>`).join('');
 
-  const R_ICON = { win:'🏆', lose:'💀', draw:'⚖️' };
+  const R_TXT = { win:'🏆 胜', lose:'💀 负', draw:'⚖️ 平' };
   const recentRows = st.recent.map(r => {
     const d = new Date(r.ts);
     const dur = Math.max(1, Math.round(r.durMs/1000));
     const mode = r.mode==='net' ? '联机' : '人机·' + (DIFF_NAMES[r.diff]||r.diff);
-    return `<div><span>${R_ICON[r.result]} ${mode}</span>
+    return `<div><span class="r-${r.result}">${R_TXT[r.result]}</span><span>${mode}</span>
       <span>击杀 ${r.kills} ｜ ${r.rounds} 回合 ｜ ${Math.floor(dur/60)}分${String(dur%60).padStart(2,'0')}秒</span>
       <span>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span></div>`;
   }).join('');
