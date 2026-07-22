@@ -1570,6 +1570,7 @@ function startTurn(side, first=false){
 
 /* ================= 电脑 AI ================= */
 async function aiTurn(){
+  if (S.turn === 'ai' || S.over) return;   // 防重入：AI 回合不得并发启动第二次
   startTurn('ai');
   S.busy = true; render();
   await sleep(400);
@@ -2019,6 +2020,7 @@ function autoTimeoutEnd(){
 
 /* 回合结束分发器：联机 → 交接给对方；人机 → 电脑行动 */
 function endTurn(){
+  if (S.turn !== 'player' || S.over) return;   // 防重入：回合已移交/已结束时，延时回调和手动点击不得再次结束回合
   // 手牌超过 5 张：先强制弃牌，弃完再继续结束回合
   if (S.turn === 'player' && !S.over && S.hand.player.length > 5) {
     enterForcedDiscard();
