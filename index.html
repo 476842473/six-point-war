@@ -936,7 +936,14 @@ function onCardClick(i){
     if (S.discardSel.length === 2) {
       const [a,b] = S.discardSel;
       if (S.hand.player[a] !== S.hand.player[b]) setTimeout(doDiscard, 300);   // 点数不同：走普通弃 2 抽 1
-      else toast('🎰 点数相同！再选 1 张同点牌可触发三连兑换（取消一张则普通弃牌）');
+      else {
+        // 点数相同：1.5 秒内可选第 3 张触发三连兑换，超时自动普通弃 2 抽 1
+        toast('🎰 点数相同！再选 1 张同点牌可触发三连兑换，否则自动弃 2 抽 1');
+        const sel = S.discardSel.slice();
+        setTimeout(()=>{
+          if (S.discardMode && S.discardSel.length === 2 && S.discardSel.every((x,k)=>x===sel[k])) doDiscard();
+        }, 1500);
+      }
     }
     if (S.discardSel.length === 3) {
       const vals = S.discardSel.map(x=>S.hand.player[x]);
