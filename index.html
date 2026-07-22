@@ -299,9 +299,10 @@
   /* 数据统计面板 */
   #statsPanel h4 { color:#f0d9a8; margin:14px 0 6px; font-size:14px; }
   #statsPanel table { width:100%; border-collapse:collapse; font-size:12px; }
-  #statsPanel th, #statsPanel td { padding:5px 6px; text-align:center; border-bottom:1px solid rgba(255,255,255,.07); }
+  #statsPanel th, #statsPanel td { padding:5px 6px; text-align:center; border-bottom:1px solid rgba(255,255,255,.07); white-space:nowrap; }
   #statsPanel th { color:#8fa0b3; font-weight:400; }
   #statsPanel td:first-child, #statsPanel th:first-child { text-align:left; }
+  #statsPanel .stScroll { overflow-x:auto; }   /* 窄屏：表格不换行，横向滑动查看 */
   .stRecent { max-height:180px; overflow:auto; }
   .stRecent div { display:flex; justify-content:space-between; padding:4px 2px; font-size:12px; border-bottom:1px solid rgba(255,255,255,.05); }
   .stRecent .r-win { color:#8fe3a8; } .stRecent .r-lose { color:#ff9a8a; } .stRecent .r-draw { color:#ffd27f; }
@@ -328,6 +329,12 @@
     h1 { font-size:15px; letter-spacing:.2em; margin:0; }
     .sub { display:none; }
     #achGrid { grid-template-columns:repeat(2,1fr); }   /* 小屏成就墙改 2 列防挤压 */
+    /* 小屏数据统计面板：紧凑排版，表格可横滑 */
+    #statsPanel { padding:14px 14px; }
+    #statsPanel table { font-size:11px; }
+    #statsPanel th, #statsPanel td { padding:4px 3px; }
+    #statsPanel h4 { font-size:13px; }
+    .stRecent div { font-size:11px; flex-wrap:wrap; row-gap:2px; }
     #aiHand { min-height:26px; margin-bottom:0; gap:4px; }
     #aiHand .mini { width:22px; height:26px; font-size:10px; border-radius:5px; }
     #aiItemBar { min-height:16px; font-size:10px; margin-bottom:0; }
@@ -2557,16 +2564,16 @@ function renderStatsPanel(){
 
   $('statsBody').innerHTML = `
     <h4>总览</h4>
-    <table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
-      ${row('全部', st.total)}</table>
+    <div class="stScroll"><table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
+      ${row('全部', st.total)}</table></div>
     <h4>分模式</h4>
-    <table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
+    <div class="stScroll"><table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
       ${row('人机 · 简单', st.vsAi.easy)}
       ${row('人机 · 普通', st.vsAi.normal)}
       ${row('人机 · 困难', st.vsAi.hard)}
-      ${row('联机对战', st.vsNet)}</table>
+      ${row('联机对战', st.vsNet)}</table></div>
     ${itemRows ? `<h4>道具（获得 / 使用 / 使用率）</h4>
-    <table><tr><th>道具</th><th>获得</th><th>使用</th><th>使用率</th></tr>${itemRows}</table>` : ''}
+    <div class="stScroll"><table><tr><th>道具</th><th>获得</th><th>使用</th><th>使用率</th></tr>${itemRows}</table></div>` : ''}
     ${recentRows ? `<h4>最近 ${st.recent.length} 场</h4><div class="stRecent">${recentRows}</div>` : ''}`;
 }
 function recordResult(win, draw){
