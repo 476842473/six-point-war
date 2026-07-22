@@ -290,12 +290,21 @@
   .achPop .an { color:#ffd27f; font-weight:700; font-size:14px; }
   .achPop .aq { color:#8fa0b3; font-size:11px; }
   @keyframes achIn { from { transform:translateX(120%); opacity:0; } to { transform:none; opacity:1; } }
-  /* 成就墙 */
-  #achBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+  /* 成就墙 / 数据统计面板（共用遮罩与面板样式） */
+  #achBox, #statsBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
     background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
-  #achBox.show { opacity:1; pointer-events:auto; }
-  #achPanel { background:#131c28; border:1px solid rgba(255,210,127,.4); border-radius:16px; padding:20px 22px; width:min(620px,94vw); max-height:86vh; overflow:auto; }
-  #achPanel > button { display:block; margin:0 auto; }
+  #achBox.show, #statsBox.show { opacity:1; pointer-events:auto; }
+  #achPanel, #statsPanel { background:#131c28; border:1px solid rgba(255,210,127,.4); border-radius:16px; padding:20px 22px; width:min(620px,94vw); max-height:86vh; overflow:auto; }
+  #achPanel > button, #statsPanel > button { display:block; margin:0 auto; }
+  /* 数据统计面板 */
+  #statsPanel h4 { color:#f0d9a8; margin:14px 0 6px; font-size:14px; }
+  #statsPanel table { width:100%; border-collapse:collapse; font-size:12px; }
+  #statsPanel th, #statsPanel td { padding:5px 6px; text-align:center; border-bottom:1px solid rgba(255,255,255,.07); }
+  #statsPanel th { color:#8fa0b3; font-weight:400; }
+  #statsPanel td:first-child, #statsPanel th:first-child { text-align:left; }
+  .stRecent { max-height:180px; overflow:auto; }
+  .stRecent div { display:flex; justify-content:space-between; padding:4px 2px; font-size:12px; border-bottom:1px solid rgba(255,255,255,.05); }
+  .stRecent .r-win { color:#8fe3a8; } .stRecent .r-lose { color:#ff9a8a; } .stRecent .r-draw { color:#ffd27f; }
   #achGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px; }
   .achCell { background:rgba(255,255,255,.05); border-radius:10px; padding:10px; text-align:center; }
   .achCell.lock { opacity:.38; filter:grayscale(.9); }
@@ -496,6 +505,7 @@
     <button id="btnStart">开 始 战 斗</button>
     <div id="recLine"></div>
     <button class="ghost" id="btnAch" style="margin-top:8px">🏆 成就墙 <span id="achCount"></span></button>
+    <button class="ghost" id="btnStats" style="margin-top:8px">📊 数据统计</button>
   </div></div>
 
   <div id="overlay"><div id="overBox">
@@ -504,6 +514,7 @@
     <div class="sub2" id="overSub"></div>
     <div id="overStats"></div>
     <button class="ghost" onclick="showShareCard()">📸 分享战绩</button>
+    <button class="ghost" onclick="showStatsPanel()">📊 数据统计</button>
     <button onclick="onAgainClick()">再来一局</button>
     <button class="ghost" onclick="showSetup()">🏠 返回主菜单</button>
   </div></div>
@@ -564,6 +575,14 @@
       <h3 style="margin:0;color:#f0d9a8">🏆 成就墙 <span id="achCount2" style="font-size:13px;color:#8fa0b3"></span></h3>
       <div id="achGrid"></div>
       <br><button onclick="$('achBox').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+
+  <div id="statsBox" onclick="if(event.target===this)this.classList.remove('show')">
+    <div id="statsPanel">
+      <h3 style="margin:0;color:#f0d9a8">📊 数据统计</h3>
+      <div id="statsBody"></div>
+      <br><button onclick="$('statsBox').classList.remove('show')">关闭</button>
     </div>
   </div>
 
@@ -694,6 +713,7 @@ $('btnBgm').onclick = () => {
 /* ================= 初始化 ================= */
 function initGame() {
   gameId++;   // 新一局：作废旧局所有挂起协程
+  gameItems = { got:{}, used:{} };   // 新一局：重置本局道具统计
   difficulty = CONFIG.difficulty;   // 以配置界面的难度为准
   // 联机先后手：主机决定（随机 / 轮换 / 主机先手），单机和客人固定本地先手视角
   let iFirst = true;
@@ -1082,6 +1102,7 @@ function guidedOpenBox(idx){
   } else if (cell.item) {
     const k = pickNoDup('player', cell.item); cell.item = null; cell.crater = true;
     S.items.player.push(k); S.stats.items.player++;
+    trackItem('player', k, 'got');   // 道具统计：制导远程开箱获得
     unlockAch('first_item');
     sfx('pickup');
     floatText(idx, ITEMS[k].icon);
@@ -1132,6 +1153,8 @@ function tryOpenRare(){
 
 function applyRareItem(side, key){
   const name = SIDE_NAME[side];
+  trackItem(side, key, 'got');    // 道具统计：稀有道具开出即视为获得
+  trackItem(side, key, 'used');   // 稀有道具开箱立即生效，获得=使用
   if (key==='drawBonus') {
     S.drawBonus[side]++;
     S.bonusLeft[side] = 3;
@@ -1268,6 +1291,7 @@ function resolveHit(attacker, idx){
     const k = pickNoDup(attacker, cell.item); cell.item = null; cell.crater = true;
     S.items[attacker].push(k);
     S.stats.items[attacker]++;
+    trackItem(attacker, k, 'got');   // 道具统计：拾取
     if (attacker==='player') unlockAch('first_item');
     sfx('pickup');
     _pendingCellFx.push({ idx, txt:ITEMS[k].icon });
@@ -1364,6 +1388,7 @@ function applySwap(a, b, itemIdx){
     log('me', `🌀 移型换位！${who}士兵从 (${ca.r+1},${ca.c+1}) 移动到 (${cb.r+1},${cb.c+1})`);
   }
   S.items.player.splice(itemIdx,1);
+  trackItem('player', 'swap', 'used');   // 道具统计：使用
   S.selItem = null; S.swapSrc = null;
   sfx('summon');
   render();
@@ -1408,6 +1433,7 @@ function onItemClick(i){
         el.onclick = () => {
           cell.soldier = null; cell.shield = false; cell.crater = true;
           S.items.player.splice(i,1); S.selItem = null;
+          trackItem('player', 'sacrifice', 'used');   // 道具统计：使用
           S.stats.sacUsed = true;   // 成就统计：身先士卒已用
           S.stats.minMe.player = Math.min(S.stats.minMe.player, countSoldiers('player'));   // 成就统计：己方最低兵力
           const drew = [1+rand(6), 1+rand(6)];
@@ -1437,6 +1463,7 @@ function onItemClick(i){
         el.onclick = () => {
           cell.shield = true;
           S.items.player.splice(i,1); S.selItem=null;
+          trackItem('player', 'shield', 'used');   // 道具统计：使用
           log('me', `🛡 你给 (${cell.r+1},${cell.c+1}) 的士兵套上护盾`);
           render();
           netSync();   // 联机：同步护盾
@@ -1448,6 +1475,7 @@ function onItemClick(i){
 
   // 即时生效类
   S.items.player.splice(i,1);
+  trackItem('player', k, 'used');   // 道具统计：使用
   let reinforceIdx = null;
   if (k==='scout') {
     S.revealAi = true;
@@ -1923,25 +1951,25 @@ function endGame(p, a, kind){
 
 /* 统一结算画面（p/a 为本地视角剩余士兵，kind: 'elim' | 'nospace'） */
 function showEndOverlay(p, a, kind, isLocal=true){
-  let icon, title, sub, draw = false;
+  let icon, title, sub, draw = false, win = false;
   if (kind === 'elim') {
-    const win = a===0 && p>0; draw = p===0 && a===0;
+    win = a===0 && p>0; draw = p===0 && a===0;
     icon  = win ? '🏆' : (draw ? '⚔️' : '💀');
     title = win ? '你赢了！' : (draw ? '同归于尽！' : '全军覆没…');
     sub   = win ? '干净利落，全场最佳炮兵！' : (draw ? '两败俱伤，谁也没占到便宜' : '胜败乃兵家常事，再来一局！');
   } else if (kind === 'nospace') {
-    const win = p > a; draw = p === a;
+    win = p > a; draw = p === a;
     icon  = win ? '🏆' : (draw ? '⚖️' : '💀');
     title = win ? '你赢了！' : (draw ? '势均力敌！' : '兵力告负…');
     sub   = `地图已被完全填满，按剩余兵力判定胜负（你 ${p} : ${a} ${SIDE_NAME.ai}）`;
   } else {   // surrender：isLocal=true 表示本方是投降方
-    const win = !isLocal;
+    win = !isLocal;
     icon  = win ? '🏆' : '🏳';
     title = win ? '对手投降，你赢了！' : '你投降了…';
     sub   = win ? '不战而屈人之兵，善之善者也' : '胜败乃兵家常事，调整后再来！';
   }
-  const win = title.includes('赢');
   recordResult(win, draw);
+  recordMatch(win, draw);   // 对局数据统计（spw_stats_v2）：本地视角落一条
   checkGameEndAch(win, draw);   // 成就：结算时统一判定
   // 生成战绩分享卡所需的数据
   LAST_END = {
@@ -1952,7 +1980,7 @@ function showEndOverlay(p, a, kind, isLocal=true){
     mode: NET.on ? '联机对战' : '人机 · ' + DIFF_NAMES[difficulty],
     achs: (S.newAch||[]).map(d=>d.name),   // 本局解锁的成就
   };
-  sfx(win ? 'win' : 'lose');
+  sfx(win ? 'win' : (draw ? 'turn' : 'lose'));   // 平局不播失败音效
   $('overIcon').textContent = icon;
   $('overText').textContent = title;
   $('overText').style.color = win ? '#8fe3a8' : '#ff9a8a';
@@ -2417,6 +2445,7 @@ function showAchWall(){
   $('achBox').classList.add('show');
 }
 $('btnAch').onclick = showAchWall;
+$('btnStats').onclick = showStatsPanel;
 /* 结算时统一判定的成就 */
 function checkGameEndAch(win, draw){
   unlockAch('first_game');
@@ -2440,6 +2469,106 @@ function checkGameEndAch(win, draw){
 /* ================= 本地战绩 ================= */
 function getRec(){ try { return JSON.parse(localStorage.getItem('spw_rec')||'{}'); } catch(e){ return {}; } }
 function saveRec(r){ try { localStorage.setItem('spw_rec', JSON.stringify(r)); } catch(e){} }
+
+/* ================= 对局数据统计（spw_stats_v2） ================= */
+const STATS_KEY = 'spw_stats_v2';
+const _emptyAgg = () => ({ games:0, wins:0, losses:0, draws:0, kills:0, rounds:0, durMs:0 });
+let gameItems = { got:{}, used:{} };   // 本局道具获得/使用计数（仅本地玩家视角）；不放进 S，避免联机同步时被对方状态覆盖
+
+function loadStats(){
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem(STATS_KEY)); } catch(e){}
+  if (st && st.v === 2) return st;
+  // 首次启动：迁移旧战绩 spw_rec，不清老玩家数据
+  st = { v:2, total:_emptyAgg(), vsAi:{ easy:_emptyAgg(), normal:_emptyAgg(), hard:_emptyAgg() },
+         vsNet:_emptyAgg(), items:{}, recent:[] };
+  const r = getRec();
+  if (r.games) {
+    st.total.games  = r.games;
+    st.total.wins   = r.wins||0;
+    st.total.draws  = r.draws||0;
+    st.total.losses = r.games - (r.wins||0) - (r.draws||0);
+    st.vsNet.games  = r.netGames||0;
+    st.vsNet.wins   = r.netWins||0;
+    st.vsNet.losses = (r.netGames||0) - (r.netWins||0);
+  }
+  saveStats(st);
+  return st;
+}
+function saveStats(st){ try { localStorage.setItem(STATS_KEY, JSON.stringify(st)); } catch(e){} }
+
+/* 道具埋点：got=拾取/开出，used=实际使用；只统计本地玩家（对方的使用在 TA 自己机器上记） */
+function trackItem(side, key, field){
+  if (side !== 'player' || !key) return;
+  gameItems[field][key] = (gameItems[field][key]||0) + 1;
+}
+
+/* 一局结束落盘：在 showEndOverlay 统一调用（含歼灭/无空地/投降所有出口） */
+function recordMatch(win, draw){
+  const st = loadStats();
+  const durMs  = Date.now() - S.stats.start;
+  const kills  = S.stats.kills.player, rounds = S.stats.rounds;
+  const agg = a => {
+    a.games++; a.kills += kills; a.rounds += rounds; a.durMs += durMs;
+    if (draw) a.draws++; else if (win) a.wins++; else a.losses++;
+  };
+  agg(st.total);
+  if (NET.on) agg(st.vsNet);
+  else agg(st.vsAi[difficulty] || (st.vsAi[difficulty] = _emptyAgg()));
+  [['got','got'],['used','use']].forEach(([f, out]) => {
+    Object.entries(gameItems[f]).forEach(([k, n]) => {
+      const o = st.items[k] || (st.items[k] = { got:0, use:0 });
+      o[out] += n;
+    });
+  });
+  st.recent.unshift({ ts:Date.now(), mode: NET.on?'net':'ai', diff:difficulty,
+                      result: draw?'draw':(win?'win':'lose'), kills, rounds, durMs });
+  if (st.recent.length > 20) st.recent.length = 20;
+  saveStats(st);
+}
+
+/* 数据统计面板 */
+function showStatsPanel(){ renderStatsPanel(); $('statsBox').classList.add('show'); }
+function renderStatsPanel(){
+  const st = loadStats();
+  const pct  = a => a.games ? Math.round(100*a.wins/a.games)+'%' : '—';
+  const avgR = a => a.games ? (a.rounds/a.games).toFixed(1) : '—';
+  const avgT = a => { if (!a.games) return '—';
+    const s = Math.round(a.durMs/a.games/1000);
+    return `${Math.floor(s/60)}分${String(s%60).padStart(2,'0')}秒`; };
+  const row = (name, a) => `<tr><td>${name}</td><td>${a.games}</td>
+    <td>${a.wins} 胜 ${a.losses} 负 ${a.draws} 平</td><td>${pct(a)}</td><td>${avgR(a)}</td><td>${avgT(a)}</td></tr>`;
+
+  const itemName = k => ITEMS[k] ? `${ITEMS[k].icon}${ITEMS[k].name}`
+                       : (RARE_ITEMS[k] ? `${RARE_ITEMS[k].icon}${RARE_ITEMS[k].name}` : k);
+  const itemRows = Object.entries(st.items).sort((x,y) => y[1].use - x[1].use)
+    .map(([k,o]) => `<tr><td>${itemName(k)}</td><td>${o.got}</td><td>${o.use}</td>
+      <td>${o.got ? Math.round(100*o.use/o.got)+'%' : '—'}</td></tr>`).join('');
+
+  const R_ICON = { win:'🏆', lose:'💀', draw:'⚖️' };
+  const recentRows = st.recent.map(r => {
+    const d = new Date(r.ts);
+    const dur = Math.max(1, Math.round(r.durMs/1000));
+    const mode = r.mode==='net' ? '联机' : '人机·' + (DIFF_NAMES[r.diff]||r.diff);
+    return `<div><span>${R_ICON[r.result]} ${mode}</span>
+      <span>击杀 ${r.kills} ｜ ${r.rounds} 回合 ｜ ${Math.floor(dur/60)}分${String(dur%60).padStart(2,'0')}秒</span>
+      <span>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span></div>`;
+  }).join('');
+
+  $('statsBody').innerHTML = `
+    <h4>总览</h4>
+    <table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
+      ${row('全部', st.total)}</table>
+    <h4>分模式</h4>
+    <table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
+      ${row('人机 · 简单', st.vsAi.easy)}
+      ${row('人机 · 普通', st.vsAi.normal)}
+      ${row('人机 · 困难', st.vsAi.hard)}
+      ${row('联机对战', st.vsNet)}</table>
+    ${itemRows ? `<h4>道具（获得 / 使用 / 使用率）</h4>
+    <table><tr><th>道具</th><th>获得</th><th>使用</th><th>使用率</th></tr>${itemRows}</table>` : ''}
+    ${recentRows ? `<h4>最近 ${st.recent.length} 场</h4><div class="stRecent">${recentRows}</div>` : ''}`;
+}
 function recordResult(win, draw){
   const r = getRec();
   r.games = (r.games||0) + 1;
