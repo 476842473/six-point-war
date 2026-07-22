@@ -335,6 +335,13 @@
     #statsPanel th, #statsPanel td { padding:4px 3px; }
     #statsPanel h4 { font-size:13px; }
     .stRecent div { font-size:11px; flex-wrap:wrap; row-gap:2px; }
+    /* 小屏主页面配置区：标签收窄、分段按钮等分不换行 */
+    .cfgRow { flex-wrap:wrap; row-gap:6px; }
+    .cfgLabel { width:auto; min-width:84px; font-size:13px; }
+    .cfgSeg { flex:1; }
+    .cfgSeg button { flex:1; padding:8px 4px; font-size:12px; white-space:nowrap; }
+    /* 小屏玩法说明：收窄留白防溢出 */
+    #rulesBox { width:92vw; padding:16px 14px; font-size:12px; line-height:1.8; }
     #aiHand { min-height:26px; margin-bottom:0; gap:4px; }
     #aiHand .mini { width:22px; height:26px; font-size:10px; border-radius:5px; }
     #aiItemBar { min-height:16px; font-size:10px; margin-bottom:0; }
