@@ -657,6 +657,7 @@ const PEER_CONFIG = {
 const LOGS = [];   // 日志记录（联机同步用）：{ side:'player'|'ai'|'sys', msg }（本地视角）
 
 let S;   // 全局状态
+let gameId = 0;   // 对局代际令牌：initGame 时递增；协程 await 醒来后比对，不一致说明已是新一局，立即退出防止污染新状态
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const rand = n => Math.floor(Math.random()*n);
@@ -692,6 +693,7 @@ $('btnBgm').onclick = () => {
 
 /* ================= 初始化 ================= */
 function initGame() {
+  gameId++;   // 新一局：作废旧局所有挂起协程
   difficulty = CONFIG.difficulty;   // 以配置界面的难度为准
   // 联机先后手：主机决定（随机 / 轮换 / 主机先手），单机和客人固定本地先手视角
   let iFirst = true;
@@ -725,7 +727,7 @@ function initGame() {
             turnKills:0,                     // 成就统计：本回合玩家击杀数
             sacUsed:false,                   // 成就统计：本局用过身先士卒
             swapVictim:null,                 // 成就统计：移型换位换来的敌兵所在格
-            minMe:CONFIG.soldiers,           // 成就统计：本局己方最低兵力
+            minMe:{player:CONFIG.soldiers, ai:CONFIG.soldiers},   // 成就统计：双方各自本局最低兵力（联机随视角翻转）
           },
     newAch:[],   // 本局解锁的成就（分享卡展示用）
   };
@@ -1091,7 +1093,9 @@ function guidedOpenBox(idx){
 
 /* ---------- 稀有道具箱：两张牌点数和正好等于目标点数开启 ---------- */
 function tryOpenRare(){
+  if (S.turn!=='player' || S.over) return;   // 回合守卫：延时回调到达时回合已移交/结束，不得再开箱
   if (S.rareOpen===null || S.rareSel.length!==2) return;
+  const gid = gameId;   // 本局代际：下面的延时 endTurn 只允许在同局内生效
   if (S.played > 0) {   // 本回合已出过牌，禁止开箱
     toast('🔒 本回合已经出过牌，不能再开启稀有宝箱');
     S.rareOpen = null; S.rareSel = []; render();
@@ -1122,7 +1126,7 @@ function tryOpenRare(){
   if (checkOver()) return;
   if (S.played >= S.needPlay) {
     if (S.items.player.length) toast('🎁 出牌次数用完，可使用道具或点「结束回合」');
-    else setTimeout(()=>endTurn(), summoned.length ? 1800 : 600);
+    else setTimeout(()=>{ if (gid===gameId) endTurn(); }, summoned.length ? 1800 : 600);   // 换代后旧定时器自动失效
   }
 }
 
@@ -1171,6 +1175,7 @@ function playSummonFx(indices){
 
 async function playCard(side, cardIdx, targetIdx){
   if (S.played >= S.needPlay) return;   // 防御：出牌次数用完不允许再出牌
+  const gid = gameId;
   const cardEl = (side==='player' ? $('hand') : $('aiHand')).children[cardIdx];   // 出牌动画起点（先取，render 后会被重建）
   const card = S.hand[side][cardIdx];
   S.hand[side].splice(cardIdx,1);
@@ -1184,6 +1189,7 @@ async function playCard(side, cardIdx, targetIdx){
   sfx('card'); sfx('cannon');
   flyShellTo(targetIdx, cardEl);
   await sleep(350);
+  if (gid!==gameId) return;   // 已换代：旧局炮击流程退出
 
   const targets = [targetIdx];
   if (chain) {
@@ -1208,7 +1214,7 @@ async function playCard(side, cardIdx, targetIdx){
       toast('🎁 出牌次数用完，可使用道具或点「结束回合」');
     } else {
       await sleep(500);
-      endTurn();   // 出牌完毕，轮到对手（联机）或电脑（人机）
+      if (gid===gameId) endTurn();   // 出牌完毕，轮到对手（联机）或电脑（人机）；换代后旧回调自动失效
     }
   }
 }
@@ -1235,7 +1241,7 @@ function resolveHit(attacker, idx){
     } else {
       cell.soldier = null; cell.crater = true;
       S.stats.kills[attacker]++;
-      if (enemy==='player') S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));   // 成就统计：最低兵力
+      S.stats.minMe[enemy] = Math.min(S.stats.minMe[enemy], countSoldiers(enemy));   // 成就统计：被击方最低兵力
       if (attacker==='player') {
         if (S.stats.kills.player === 1) unlockAch('first_kill');
         S.stats.turnKills++;
@@ -1254,9 +1260,9 @@ function resolveHit(attacker, idx){
     shakeMap();
     _pendingCellFx.push({ idx, txt:'💥', death:attacker });
     log('sys', `😱 ${pos} 连环雷误杀！${SIDE_NAME[attacker]}一名己方士兵被自己人炸死`);
+    S.stats.minMe[attacker] = Math.min(S.stats.minMe[attacker], countSoldiers(attacker));   // 成就统计：误杀方最低兵力
     if (attacker==='player') {
       unlockAch('friendly');   // 成就：痛击队友（负面成就也是笑点）
-      S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));
     }
   } else if (cell.item && !cell.crater) {
     const k = pickNoDup(attacker, cell.item); cell.item = null; cell.crater = true;
@@ -1403,7 +1409,7 @@ function onItemClick(i){
           cell.soldier = null; cell.shield = false; cell.crater = true;
           S.items.player.splice(i,1); S.selItem = null;
           S.stats.sacUsed = true;   // 成就统计：身先士卒已用
-          S.stats.minMe = Math.min(S.stats.minMe, countSoldiers('player'));
+          S.stats.minMe.player = Math.min(S.stats.minMe.player, countSoldiers('player'));   // 成就统计：己方最低兵力
           const drew = [1+rand(6), 1+rand(6)];
           S.hand.player.push(...drew);
           S.needPlay++;   // 卖血换节奏：本回合多一次出牌
@@ -1502,6 +1508,7 @@ function spawnBox(){
 
 /* ================= 掷骰摸牌 ================= */
 async function diceAndDraw(side){
+  const gid = gameId;
   S.busy = true; render();
   sfx('dice');
   const ds = $('diceSide');
@@ -1518,6 +1525,7 @@ async function diceAndDraw(side){
   });
   const anim = setInterval(()=>diceEls.forEach(d=>d.textContent=1+rand(6)), 90);
   await sleep(700);
+  if (gid!==gameId) { clearInterval(anim); return; }   // 已换代：停止掷骰动画并退出
   clearInterval(anim);
   diceEls.forEach((d,i)=>{ d.classList.remove('rolling'); d.innerHTML = pipsHtml(vals[i]); });
 
@@ -1529,14 +1537,16 @@ async function diceAndDraw(side){
   render();
   netSync();   // 联机：同步摸牌与刷箱结果给对手
   await sleep(600);
+  if (gid!==gameId) return;   // 已换代：退出
 }
 
 /* ---------- 玩家回合：掷骰摸牌 → 出牌 ---------- */
 async function beginPlayerTurn(first=false){
+  const gid = gameId;
   startTurn('player', first);
   S.stats.rounds++;
   await diceAndDraw('player');
-  if (S.over) return;
+  if (S.over || gid!==gameId) return;   // 结束或已换代：退出
   S.busy = false;   // 摸牌完成，进入出牌阶段
   render();
   maybeStartGuide();   // 首次游戏的新手引导（只显示一次）
@@ -1571,12 +1581,15 @@ function startTurn(side, first=false){
 /* ================= 电脑 AI ================= */
 async function aiTurn(){
   if (S.turn === 'ai' || S.over) return;   // 防重入：AI 回合不得并发启动第二次
+  const gid = gameId;   // 本局代际：每次 await 醒来后比对，换代立即退出
   startTurn('ai');
   S.busy = true; render();
   await sleep(400);
+  if (gid!==gameId) return;
   await diceAndDraw('ai');   // 回合开始：掷骰摸牌
-  if (S.over) return;
+  if (S.over || gid!==gameId) return;
   await sleep(400);
+  if (gid!==gameId) return;
 
   // --- 先用道具（简单难度：不用道具、不开稀有箱） ---
   const has = k => S.items.ai.indexOf(k);
@@ -1589,12 +1602,14 @@ async function aiTurn(){
     render();
     if (typeof ri === 'number') playSummonFx([ri]);
     await sleep(typeof ri === 'number' ? 1200 : 600);
+    if (gid!==gameId) return;
   }
   // 困难 AI：侦察——直接看玩家手牌，精准判断威胁
   if (hard && has('scout')>=0) {
     S.items.ai.splice(has('scout'),1);
     log('ai','🔭 电脑使用了侦察，它看清了你的手牌！');
     render(); await sleep(600);
+    if (gid!==gameId) return;
   }
   // 护盾：普通=士兵≤3时随机套；困难=精准套给被威胁最大的士兵
   if (has('shield')>=0) {
@@ -1612,12 +1627,14 @@ async function aiTurn(){
         ? `🧠 电脑算计过后，给 (${target.r+1},${target.c+1}) 的士兵精准套上护盾`
         : `🛡 电脑给 (${target.r+1},${target.c+1}) 的士兵套上护盾`);
       render(); await sleep(600);
+      if (gid!==gameId) return;
     }
   }
   // 弹药补给：普通=3 次有效攻击才用；困难=2 次就用
   if (has('ammo')>=0 && countHits('ai') >= (hard?2:3)) {
     S.items.ai.splice(has('ammo'),1); S.needPlay++;
     log('ai',`⚡ 电脑使用了弹药补给，本回合打出 ${S.needPlay} 张牌！`); render(); await sleep(600);
+    if (gid!==gameId) return;
   }
   // 连环雷：若存在能波及 ≥2 名玩家士兵的炸点（困难：绝不误伤自己人）
   if (has('chain')>=0) {
@@ -1625,6 +1642,7 @@ async function aiTurn(){
     if (spot!==null) {
       S.items.ai.splice(has('chain'),1); S.chainNext.ai = true;
       log('ai','💣 电脑部署了连环雷…'); render(); await sleep(600);
+      if (gid!==gameId) return;
     }
   }
 
@@ -1636,6 +1654,7 @@ async function aiTurn(){
     S.hand.ai = Array.from({length:n}, ()=>1+rand(6));
     log('ai', `🔥 电脑变废为宝，弃掉全部手牌重抽 ${n} 张！`);
     render(); await sleep(600);
+    if (gid!==gameId) return;
   }
   // 身先士卒：兵力领先且手牌差时，牺牲一名士兵抽 2 张
   if (has('sacrifice')>=0 && countSoldiers('ai') > countSoldiers('player') && S.hand.ai.length<=2) {
@@ -1650,6 +1669,7 @@ async function aiTurn(){
       sfx('explosion');
       log('ai', `🗡 电脑牺牲了 (${victim.r+1},${victim.c+1}) 的士兵，抽取 2 张牌，本回合出牌次数 +1！`);
       render(); await sleep(600);
+      if (gid!==gameId) return;
     }
   }
 
@@ -1667,6 +1687,7 @@ async function aiTurn(){
         sfx('summon');
         log('ai', `🌀 电脑把你的士兵从 (${victim.r+1},${victim.c+1}) 拖到了 (${dest.r+1},${dest.c+1})！`);
         render(); await sleep(800);
+        if (gid!==gameId) return;
         moved = true; break;
       }
     }
@@ -1684,6 +1705,7 @@ async function aiTurn(){
       log('ai', `🎯 电脑用精准制导直接解锁了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
       const gSummoned = applyRareItem('ai', key);
       render(); playSummonFx(gSummoned); await sleep(gSummoned.length ? 1800 : 900);
+      if (gid!==gameId) return;
       if (checkOver()) return;
     }
   }
@@ -1703,12 +1725,14 @@ async function aiTurn(){
       log('ai', `✨ 电脑用点数和 ${sum} 开启了稀有道具箱：【${RARE_ITEMS[key].icon}${RARE_ITEMS[key].name}】`);
       const aiSummoned = applyRareItem('ai', key);
       render(); playSummonFx(aiSummoned); await sleep(aiSummoned.length ? 1800 : 900);
+      if (gid!==gameId) return;
     }
   }
   } // end if (difficulty!=='easy')
 
   // --- 出牌 ---
   while (S.played < S.needPlay) {
+    if (gid!==gameId) return;   // 已换代：退出
     if (checkOver()) return;
     if (!S.hand.ai.length) {   // 手牌打空，提前结束回合
       log('ai','🤖 电脑手牌已空，提前结束回合'); break;
@@ -1718,6 +1742,7 @@ async function aiTurn(){
       log('ai','🤖 电脑无牌可出，跳过了出牌'); break;
     }
     await playCardAI(move.cardIdx, move.targetIdx);
+    if (gid!==gameId) return;   // 已换代：退出
     if (checkOver()) return;   // 最后一张牌击杀也要结算胜负
   }
   if (checkOver()) return;     // 循环结束后再兜底检查一次
@@ -1734,6 +1759,7 @@ async function aiTurn(){
   }
 
   await sleep(400);
+  if (gid!==gameId) return;   // 已换代：不得把回合交给新局的玩家
   S.busy = false;
   beginPlayerTurn();   // 电脑行动完毕，轮到玩家（回合开始掷骰摸牌）
 }
@@ -1841,6 +1867,7 @@ function aiPickMove(){
 }
 
 async function playCardAI(cardIdx, targetIdx){
+  const gid = gameId;
   // 复用 playCard 的流程，但带 AI 节奏
   const cardEl = $('aiHand').children[cardIdx];
   const card = S.hand.ai[cardIdx];
@@ -1853,6 +1880,7 @@ async function playCardAI(cardIdx, targetIdx){
   sfx('card'); sfx('cannon');
   flyShellTo(targetIdx, cardEl);
   render(); await sleep(700);
+  if (gid!==gameId) return;   // 已换代：退出
 
   const targets = [targetIdx];
   if (chain) {
@@ -1865,6 +1893,7 @@ async function playCardAI(cardIdx, targetIdx){
   S.played++;
   render(); flushCellFx();
   await sleep(650);
+  if (gid!==gameId) return;   // 已换代：退出
 }
 
 /* ================= 胜负 ================= */
@@ -1965,7 +1994,7 @@ function swapState(src){
   c.forcedDiscard = 0;
   [c.guidedNext.player, c.guidedNext.ai] = [c.guidedNext.ai, c.guidedNext.player];
   [c.chainNext.player, c.chainNext.ai]   = [c.chainNext.ai, c.chainNext.player];
-  ['kills','items','rares'].forEach(k => { const t = c.stats[k]; [t.player, t.ai] = [t.ai, t.player]; });
+  ['kills','items','rares','shieldBlocks','minMe'].forEach(k => { const t = c.stats[k]; [t.player, t.ai] = [t.ai, t.player]; });   // 均为 {player,ai} 结构，随视角翻转
   c.cells.forEach(cell => { if (cell.soldier) cell.soldier = cell.soldier==='player' ? 'ai' : 'player'; });
   c.turn = c.turn==='player' ? 'ai' : 'player';
   // 瞬态/选择态不继承
@@ -2400,7 +2429,7 @@ function checkGameEndAch(win, draw){
     if (st >= 5) unlockAch('streak5');
   }
   if (win) {
-    if (S.stats.minMe === 1) unlockAch('comeback');
+    if (S.stats.minMe.player === 1) unlockAch('comeback');
     if (S.stats.rounds <= 5) unlockAch('blitz');
     if (S.stats.sacUsed) unlockAch('sac_win');
     const r = getRec();
@@ -2567,10 +2596,13 @@ $('btnCopyCode').onclick = async () => {
   catch(e){ toast('房间码：' + NET.code + '（请手动复制）'); }
 };
 $('btnStart').onclick = () => {
+  if (window._starting) return;   // 防双击：重复点击不得开局两次（否则旧开局协程会在新局上再跑一遍掷骰摸牌）
   if (netMode==='net') {
     if (!NET.isHost) { toast('等待主机开始战斗'); return; }
     if (!NET.conn || !NET.conn.open) { setNetStatus('好友还未加入，先把房间码发给 TA', 'warn'); return; }
   }
+  window._starting = true;
+  setTimeout(()=>window._starting=false, 1500);
   $('setup').classList.add('hide');
   initGame();
 };
