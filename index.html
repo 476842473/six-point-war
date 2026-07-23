@@ -290,6 +290,17 @@
   .achPop .an { color:#ffd27f; font-weight:700; font-size:14px; }
   .achPop .aq { color:#8fa0b3; font-size:11px; }
   @keyframes achIn { from { transform:translateX(120%); opacity:0; } to { transform:none; opacity:1; } }
+  /* 死牌检测条：1~6 点活格数 + 联动高亮 */
+  #cellBar { display:flex; gap:6px; justify-content:flex-end; margin:2px 0 4px; }
+  .cbCell { min-width:38px; padding:2px 6px; border-radius:8px; background:rgba(255,255,255,.05);
+    font-size:12px; text-align:center; cursor:pointer; user-select:none; border:1px solid transparent; }
+  .cbCell b { font-size:13px; }
+  .cbCell.cbDead { opacity:.45; }
+  .cbCell.cbDead b { color:#ff9a8a; }
+  .cbCell.cbOn { border-color:#ffd27f; background:rgba(255,210,127,.12); }
+  .cell.hintV { box-shadow:0 0 0 2px #ffd27f inset, 0 0 10px rgba(255,210,127,.5); }
+  .card.dead { opacity:.45; filter:grayscale(.6); }
+
   /* 成就墙 / 数据统计面板（共用遮罩与面板样式） */
   #achBox, #statsBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
     background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
@@ -441,6 +452,7 @@
     <div class="handLabel"><span>🎁 道具（点击使用，不占出牌数）</span><span id="hint"></span></div>
     <div id="itemBar"></div>
     <div class="handLabel"><span>🂠 你的手牌（开局 3 张，回合开始掷骰摸牌，回合结束需 ≤5 张）</span><span id="playState"></span></div>
+    <div id="cellBar"></div>
     <div id="hand"></div>
   </div>
 
@@ -834,18 +846,23 @@ function toast(msg){
 }
 
 /* ================= 渲染 ================= */
+let hintValue = null;   // 死牌检测条：当前联动高亮的点数（null=关闭）
 function render() {
   // 无空地判定：地图被占满时立即按剩余兵力结算（联机时仅由行动方触发，接收端等同步）
   if (!S.over && !(NET.on && S.turn==='ai') && !S.cells.some(c=>!c.soldier && !c.item && !c.rareItem && !c.crater)) {
     noSpaceEnd();
     return;
   }
+  // 各点数活格数（非弹坑、非稀有箱）：死牌检测条 + 手牌死牌灰显共用
+  const aliveCnt = [0,0,0,0,0,0];
+  S.cells.forEach(c => { if (!c.crater && !c.rareItem) aliveCnt[c.value-1]++; });
   // 地图
   const map = $('map'); map.innerHTML='';
   S.cells.forEach(cell => {
     const el = document.createElement('div');
     const canActNow = !S.over && !S.busy && S.turn==='player';
     el.className = `cell v${cell.value}` + (cell.crater?' crater':'') + (isTargetable(cell)?' targetable':'');
+    if (hintValue !== null && cell.value === hintValue && !cell.crater) el.classList.add('hintV');   // 检测条联动高亮
     if (cell.rareItem) el.classList.add('rarebox') + (canActNow && el.classList.add('canopen'));
     if (cell.item && !cell.crater && S.guidedNext.player && canActNow) el.classList.add('canopen');
     el.innerHTML = `<span class="val">${cell.value}</span>`;
@@ -871,7 +888,8 @@ function render() {
   const hand = $('hand'); hand.innerHTML='';
   S.hand.player.forEach((v,i) => {
     const c = document.createElement('div');
-    c.className = 'card' + (S.selCard===i?' selected':'') + (S.discardSel && S.discardSel.includes(i)?' discard-sel':'') + (S.rareSel && S.rareSel.includes(i)?' selected':'');
+    c.className = 'card' + (S.selCard===i?' selected':'') + (S.discardSel && S.discardSel.includes(i)?' discard-sel':'') + (S.rareSel && S.rareSel.includes(i)?' selected':'')
+      + (aliveCnt[v-1]===0 ? ' dead':'');   // 死牌：该点数已无活格
     const vc = VCOLORS[v-1];
     c.innerHTML = `<div class="cband" style="background:linear-gradient(90deg,${vc},${vc}cc)"></div>
       <div class="corner tl" style="color:${vc}">${v}</div>
@@ -881,6 +899,17 @@ function render() {
     c.onclick = () => onCardClick(i);
     hand.appendChild(c);
   });
+  // 死牌检测条：1~6 点活格数，点击联动高亮棋盘对应格子
+  const cb = $('cellBar'); cb.innerHTML = '';
+  for (let v = 1; v <= 6; v++) {
+    const d = document.createElement('div');
+    const dead = aliveCnt[v-1] === 0;
+    d.className = 'cbCell' + (dead ? ' cbDead' : '') + (hintValue === v ? ' cbOn' : '');
+    d.innerHTML = `<b style="color:${VCOLORS[v-1]}">${v}</b> ×${aliveCnt[v-1]}`;
+    d.title = dead ? `${v} 点格已全部被毁，${v} 点牌是死牌` : `点击高亮棋盘上所有 ${v} 点格`;
+    d.onclick = () => { hintValue = hintValue === v ? null : v; render(); };
+    cb.appendChild(d);
+  }
   // 电脑手牌
   const ah = $('aiHand'); ah.innerHTML='';
   S.hand.ai.forEach(v => {
