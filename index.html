@@ -301,6 +301,16 @@
   .cell.hintV { box-shadow:0 0 0 2px #ffd27f inset, 0 0 10px rgba(255,210,127,.5); }
   .card.dead { opacity:.45; filter:grayscale(.6); }
 
+  /* 士兵皮肤选择 */
+  .skinGrid { display:flex; gap:8px; flex-wrap:wrap; flex:1; }
+  .skinCell { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 10px;
+    border-radius:10px; background:rgba(255,255,255,.05); cursor:pointer; border:1px solid transparent; min-width:52px; }
+  .skinCell .si { font-size:22px; }
+  .skinCell .sn { font-size:11px; color:#8fa0b3; }
+  .skinCell.on { border-color:#ffd27f; background:rgba(255,210,127,.12); }
+  .skinCell.on .sn { color:#f0d9a8; }
+  .skinCell.lock { opacity:.5; }
+
   /* 成就墙 / 数据统计面板（共用遮罩与面板样式） */
   #achBox, #statsBox { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
     background:rgba(5,10,16,.8); opacity:0; pointer-events:none; transition:opacity .25s; }
@@ -528,6 +538,10 @@
         <button data-v="host">主机先手</button>
       </div>
     </div>
+    <div class="cfgRow">
+      <span class="cfgLabel">🎨 士兵皮肤</span>
+      <div id="skinRow" class="skinGrid"></div>
+    </div>
     <button id="btnStart">开 始 战 斗</button>
     <div id="recLine"></div>
     <button class="ghost" id="btnAch" style="margin-top:8px">🏆 成就墙 <span id="achCount"></span></button>
@@ -681,7 +695,47 @@ let difficulty = 'normal';
 const CONFIG = { difficulty:'normal', soldiers:5, boxes:7, plays:2, firstMove:'random' };
 const CFG_RANGE = { soldiers:[3,8], boxes:[0,12], plays:[1,4] };
 const CFG_LABEL = { soldiers:'vSoldiers', boxes:'vBoxes', plays:'vPlays' };
-const SOLDIER = { player:'🪖', ai:'🤖' };
+const SOLDIER = { player:'🪖', ai:'🤖' };   // 默认图标（皮肤系统的兜底）
+/* ---------- 士兵皮肤：ach 为解锁成就 id（null=默认拥有） ---------- */
+const SKINS = [
+  { id:'classic', name:'经典大兵', icon:'🪖', ach:null },
+  { id:'ninja',   name:'暗影忍者', icon:'🥷', ach:'blitz' },       // 闪电战：5 回合内获胜（中）
+  { id:'cat',     name:'喵星军团', icon:'🐱', ach:'dbl_kill' },    // 一炮双响：单回合 2 杀（中）
+  { id:'zombie',  name:'丧尸出笼', icon:'🧟', ach:'comeback' },    // 丝血翻盘：1 兵反杀（高）
+  { id:'mecha',   name:'钢铁机甲', icon:'🤖', ach:'win50' },       // 常胜将军：累计 50 胜（极高）
+];
+function mySkinId(){
+  const id = localStorage.getItem('spw_skin') || 'classic';
+  return SKINS.some(s => s.id === id) ? id : 'classic';
+}
+function skinUnlocked(s){ return !s.ach || !!getAch()[s.ach]; }
+/* 士兵图标：己方显示自己选的皮肤；联机对方显示 TA 同步来的皮肤，人机固定默认 */
+function skinIcon(side){
+  if (side === 'player') return SKINS.find(s => s.id === mySkinId()).icon;
+  const peer = NET.on && SKINS.find(s => s.id === NET.peerSkin);   // peerSkin 存的是皮肤 id
+  return (peer && peer.icon) || SOLDIER.ai;
+}
+/* 开局界面皮肤选择行：未解锁的灰色带锁，点击提示解锁条件 */
+function renderSkinRow(){
+  const row = $('skinRow'); if (!row) return;
+  const cur = mySkinId(); row.innerHTML = '';
+  SKINS.forEach(s => {
+    const un = skinUnlocked(s);
+    const cond = s.ach ? ((ACHIEVEMENTS.find(a => a.id === s.ach) || {}).cond || '') : '';
+    const d = document.createElement('div');
+    d.className = 'skinCell' + (s.id === cur ? ' on' : '') + (un ? '' : ' lock');
+    d.innerHTML = `<span class="si">${un ? s.icon : '🔒'}</span><span class="sn">${s.name}</span>`;
+    d.title = un ? s.name : `未解锁：${cond}`;
+    d.onclick = () => {
+      if (!skinUnlocked(s)) { toast(`🔒 未解锁：${cond}`); return; }
+      try { localStorage.setItem('spw_skin', s.id); } catch(e){}
+      renderSkinRow();
+      if (typeof S !== 'undefined' && S) render();   // 局内换皮肤立即生效
+      sendSkin();   // 联机：同步给对方
+    };
+    row.appendChild(d);
+  });
+}
 let SIDE_NAME = { player:'你', ai:'电脑' };
 
 /* ================= 联机对战（PeerJS 房间码直连） ================= */
@@ -867,7 +921,7 @@ function render() {
     if (cell.item && !cell.crater && S.guidedNext.player && canActNow) el.classList.add('canopen');
     el.innerHTML = `<span class="val">${cell.value}</span>`;
     if (cell.soldier) {
-      el.innerHTML += `<span class="soldier">${SOLDIER[cell.soldier]}</span>`;
+      el.innerHTML += `<span class="soldier">${skinIcon(cell.soldier)}</span>`;
       if (cell.shield) el.innerHTML += `<span class="badge">🛡</span>`;
     }
     if (cell.rareItem) el.innerHTML += `<span class="itembox">🎁</span><span class="rareTag">稀·${cell.rareTarget}</span>`;
@@ -1379,7 +1433,7 @@ function soldierDieFx(idx, side){
   const el = $('map').children[idx];
   if (!el) return;
   const d = document.createElement('span');
-  d.className = 'dieFall'; d.textContent = SOLDIER[side];
+  d.className = 'dieFall'; d.textContent = skinIcon(side);
   el.appendChild(d); setTimeout(()=>d.remove(), 750);
 }
 function flushCellFx(){
@@ -2148,6 +2202,11 @@ function onNetData(d){
     showEmote(d.e, d.txt, false);
     return;
   }
+  if (d.t === 'skin') {   // 对方的士兵皮肤
+    NET.peerSkin = d.v;
+    if (typeof S !== 'undefined' && S) render();
+    return;
+  }
   if (d.t === 'cfg') {   // 主机改了配置：客人只读同步
     Object.assign(CONFIG, d.cfg);
     Object.keys(CFG_LABEL).forEach(k => $(CFG_LABEL[k]).textContent = CONFIG[k]);
@@ -2217,6 +2276,7 @@ function cleanupNet(){
 }
 function leaveOnline(){
   NET.on = false; NET.isHost = false; NET.code = '';
+  NET.peerSkin = null;   // 清除对方皮肤，回到默认图标
   stopTurnTimer();
   cleanupNet();
   SIDE_NAME.ai = '电脑'; applyNetNames();
@@ -2255,6 +2315,7 @@ function hostRoom(){
       NET.on = true; SIDE_NAME.ai = '对手'; applyNetNames();
       $('btnNetRetry').style.display = 'none';
       setNetStatus('✅ 好友已加入！点击「开始战斗」开局', 'ok');
+      sendSkin();   // 互发士兵皮肤
     });
     conn.on('data', onNetData);
     conn.on('close', onPeerLost);
@@ -2289,6 +2350,7 @@ function joinRoom(code){
       setNetStatus('✅ 已连接！等待主机开始战斗…（配置由主机决定）', 'ok');
       $('btnStart').style.display = 'none';
       $('setupBox').classList.add('guestView');   // 配置只读
+      sendSkin();   // 互发士兵皮肤
     });
     conn.on('data', onNetData);
     conn.on('close', onPeerLost);
@@ -2457,6 +2519,7 @@ function unlockAch(id){
   if (S && S.newAch) S.newAch.push(def);   // 记录本局解锁，分享卡用
   achPop(def);
   refreshAchCount();
+  renderSkinRow();   // 成就解锁可能连带解锁皮肤，刷新选择行
 }
 function achPop(def){
   const box = $('achToasts');
@@ -2489,6 +2552,7 @@ function showAchWall(){
 }
 $('btnAch').onclick = showAchWall;
 $('btnStats').onclick = showStatsPanel;
+renderSkinRow();   // 初始渲染皮肤选择行
 /* 结算时统一判定的成就 */
 function checkGameEndAch(win, draw){
   unlockAch('first_game');
@@ -2705,6 +2769,10 @@ function endGuide(){
 function sendCfg(){
   if (NET.on && NET.isHost && NET.conn && NET.conn.open) NET.conn.send({ t:'cfg', cfg: CONFIG });
 }
+/* 双方互发士兵皮肤（个人外观，不属于主机配置） */
+function sendSkin(){
+  if (NET.on && NET.conn && NET.conn.open) NET.conn.send({ t:'skin', v: mySkinId() });
+}
 document.querySelectorAll('#cfgDiff button').forEach(b=>{
   b.onclick = () => {
     if ($('setupBox').classList.contains('guestView')) return;   // 客人只读
@@ -2786,6 +2854,7 @@ function showSetup(){
   $('recLine').textContent = recText();
   $('overlay').classList.remove('show');
   $('setup').classList.remove('hide');
+  renderSkinRow();   // 回主菜单时刷新皮肤解锁状态
 }
 
 /* ================= 按钮 ================= */
