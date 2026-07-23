@@ -1367,6 +1367,7 @@ function resolveHit(attacker, idx){
         if (S.stats.kills.player === 1) unlockAch('first_kill');
         S.stats.turnKills++;
         if (S.stats.turnKills >= 2) unlockAch('dbl_kill');
+        if (S.stats.turnKills >= 4) unlockAch('quad_kill');   // 单回合 4 杀
         if (S.stats.swapVictim === idx) { unlockAch('swap_kill'); S.stats.swapVictim = null; }   // 换位换来的敌兵当回合被炸死
       }
       sfx('explosion');
@@ -2508,6 +2509,10 @@ const ACHIEVEMENTS = [
   { id:'rare3',        icon:'🧠', name:'精打细算',   cond:'一局内开启 3 个稀有宝箱',         quote:'别人打仗靠炮，你靠脑子', r:2 },
   { id:'win50',        icon:'👑', name:'常胜将军',   cond:'累计 50 胜',                      quote:'战功赫赫，建议授衔', r:3 },
   { id:'streak5',      icon:'🔥', name:'五连绝世',   cond:'联机 5 连胜',                     quote:'建议朋友们联合起来抵制你', r:3 },
+  { id:'ten_kills',    icon:'☠️', name:'十步一杀',   cond:'单局击杀数达到 10',               quote:'十步杀一人，千里不留行', r:2 },
+  { id:'item10',       icon:'🎁', name:'军火大亨',   cond:'单局使用道具达到 10 次（含稀有道具）', quote:'打仗嘛，后勤才是本体', r:2 },
+  { id:'quad_kill',    icon:'💫', name:'四连超凡',   cond:'单回合击杀 4 名士兵（不限击杀方式）', quote:'超神发挥，对面集体沉默', r:3 },
+  { id:'first_draw',   icon:'⚖️', name:'握手言和',   cond:'第一次以平局结束对局',            quote:'英雄所见略同，下次再分高下', r:0 },
 ];
 /* 成就稀有度：0 普通 / 1 稀有 / 2 史诗 / 3 传说 */
 const RARITY = [
@@ -2549,7 +2554,8 @@ function refreshAchCount(){
 }
 function showAchWall(){
   const a = getAch();
-  $('achGrid').innerHTML = ACHIEVEMENTS.map(d => {
+  const sorted = ACHIEVEMENTS.slice().sort((x,y) => x.r - y.r);   // 按稀有度升序：越稀有越靠后（同级保持原顺序）
+  $('achGrid').innerHTML = sorted.map(d => {
     const un = !!a[d.id];
     const r = RARITY[d.r];
     return `<div class="achCell${un?'':' lock'}" style="border:1px solid ${r.color}66">
@@ -2569,6 +2575,10 @@ renderSkinRow();   // 初始渲染皮肤选择行
 function checkGameEndAch(win, draw){
   unlockAch('first_game');
   if (NET.on) unlockAch('first_net');
+  if (draw) unlockAch('first_draw');   // 平局纪念
+  if (S.stats.kills.player >= 10) unlockAch('ten_kills');   // 单局击杀 10（不论胜负）
+  const itemUsedN = Object.values(gameItems.used).reduce((s,n)=>s+n, 0);
+  if (itemUsedN >= 10) unlockAch('item10');   // 单局道具使用 10 次（含稀有道具）
   // 联机连胜
   if (NET.on) {
     let st = +(localStorage.getItem('spw_net_streak')||0);
