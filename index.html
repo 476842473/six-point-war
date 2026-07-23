@@ -332,6 +332,7 @@
   .achCell.lock { opacity:.38; filter:grayscale(.9); }
   .achCell .ai2 { font-size:26px; }
   .achCell .an { font-size:13px; font-weight:700; color:#f0d9a8; margin:4px 0 2px; }
+  .achCell .ar { font-size:10px; letter-spacing:.1em; margin-bottom:2px; }
   .achCell .ac { font-size:11px; color:#8fa0b3; }
 
   /* 三连兑换点数选择器 */
@@ -2491,22 +2492,29 @@ function showShareCard(){
 
 /* ================= 成就系统 ================= */
 const ACHIEVEMENTS = [
-  { id:'first_game',   icon:'🎖', name:'新兵报到',   cond:'完成第 1 局游戏',                 quote:'欢迎入伍，炮弹不长眼' },
-  { id:'first_kill',   icon:'🎯', name:'首开纪录',   cond:'首次击杀 1 名士兵',               quote:'第一滴血，手感来了' },
-  { id:'first_item',   icon:'📦', name:'开箱达人',   cond:'首次拾取道具',                    quote:'白捡的就是香' },
-  { id:'first_rare',   icon:'✨', name:'壕气冲天',   cond:'首次开启稀有宝箱',                quote:'精准的心，颤抖的手' },
-  { id:'first_net',    icon:'🤝', name:'网友见面',   cond:'完成第 1 局联机对战',             quote:'友谊第一，比赛第二（假的）' },
-  { id:'dbl_kill',     icon:'💥', name:'一炮双响',   cond:'单回合击杀 2 名士兵',             quote:'炮弹批发，概不赊账' },
-  { id:'chain_multi',  icon:'🔗', name:'连环杀手',   cond:'连环雷一次炸死 2 名以上士兵',     quote:'数学家看了都点头' },
-  { id:'sac_win',      icon:'🗡', name:'壮士断腕',   cond:'使用身先士卒后获胜',              quote:'兵的命也是命……但胜利更重要' },
-  { id:'swap_kill',    icon:'🌀', name:'乾坤大挪移', cond:'移型换位换来敌兵后，当回合炸死它', quote:'送你上路，不用谢' },
-  { id:'friendly',     icon:'😱', name:'痛击队友',   cond:'连环雷误杀己方士兵',              quote:'这一炮，友军沉默了' },
-  { id:'comeback',     icon:'🩸', name:'丝血翻盘',   cond:'只剩 1 兵时反杀获胜',             quote:'血压拉满，建议回放十遍' },
-  { id:'shield3',      icon:'🛡', name:'刀枪不入',   cond:'单局用护盾抵挡 3 次炮击',         quote:'对面炮弹质检不合格' },
-  { id:'blitz',        icon:'⚡', name:'闪电战',     cond:'5 回合内获胜',                    quote:'对面还没反应过来就结束了' },
-  { id:'rare3',        icon:'🧠', name:'精打细算',   cond:'一局内开启 3 个稀有宝箱',         quote:'别人打仗靠炮，你靠脑子' },
-  { id:'win50',        icon:'👑', name:'常胜将军',   cond:'累计 50 胜',                      quote:'战功赫赫，建议授衔' },
-  { id:'streak5',      icon:'🔥', name:'五连绝世',   cond:'联机 5 连胜',                     quote:'建议朋友们联合起来抵制你' },
+  { id:'first_game',   icon:'🎖', name:'新兵报到',   cond:'完成第 1 局游戏',                 quote:'欢迎入伍，炮弹不长眼', r:0 },
+  { id:'first_kill',   icon:'🎯', name:'首开纪录',   cond:'首次击杀 1 名士兵',               quote:'第一滴血，手感来了', r:0 },
+  { id:'first_item',   icon:'📦', name:'开箱达人',   cond:'首次拾取道具',                    quote:'白捡的就是香', r:0 },
+  { id:'first_rare',   icon:'✨', name:'壕气冲天',   cond:'首次开启稀有宝箱',                quote:'精准的心，颤抖的手', r:1 },
+  { id:'first_net',    icon:'🤝', name:'网友见面',   cond:'完成第 1 局联机对战',             quote:'友谊第一，比赛第二（假的）', r:0 },
+  { id:'dbl_kill',     icon:'💥', name:'一炮双响',   cond:'单回合击杀 2 名士兵',             quote:'炮弹批发，概不赊账', r:1 },
+  { id:'chain_multi',  icon:'🔗', name:'连环杀手',   cond:'连环雷一次炸死 2 名以上士兵',     quote:'数学家看了都点头', r:2 },
+  { id:'sac_win',      icon:'🗡', name:'壮士断腕',   cond:'使用身先士卒后获胜',              quote:'兵的命也是命……但胜利更重要', r:2 },
+  { id:'swap_kill',    icon:'🌀', name:'乾坤大挪移', cond:'移型换位换来敌兵后，当回合炸死它', quote:'送你上路，不用谢', r:2 },
+  { id:'friendly',     icon:'😱', name:'痛击队友',   cond:'连环雷误杀己方士兵',              quote:'这一炮，友军沉默了', r:0 },
+  { id:'comeback',     icon:'🩸', name:'丝血翻盘',   cond:'只剩 1 兵时反杀获胜',             quote:'血压拉满，建议回放十遍', r:2 },
+  { id:'shield3',      icon:'🛡', name:'刀枪不入',   cond:'单局用护盾抵挡 3 次炮击',         quote:'对面炮弹质检不合格', r:1 },
+  { id:'blitz',        icon:'⚡', name:'闪电战',     cond:'5 回合内获胜',                    quote:'对面还没反应过来就结束了', r:1 },
+  { id:'rare3',        icon:'🧠', name:'精打细算',   cond:'一局内开启 3 个稀有宝箱',         quote:'别人打仗靠炮，你靠脑子', r:2 },
+  { id:'win50',        icon:'👑', name:'常胜将军',   cond:'累计 50 胜',                      quote:'战功赫赫，建议授衔', r:3 },
+  { id:'streak5',      icon:'🔥', name:'五连绝世',   cond:'联机 5 连胜',                     quote:'建议朋友们联合起来抵制你', r:3 },
+];
+/* 成就稀有度：0 普通 / 1 稀有 / 2 史诗 / 3 传说 */
+const RARITY = [
+  { name:'普通', color:'#8fa0b3' },
+  { name:'稀有', color:'#5eb3ff' },
+  { name:'史诗', color:'#c586ff' },
+  { name:'传说', color:'#ffd27f' },
 ];
 function getAch(){ try { return JSON.parse(localStorage.getItem('spw_ach')||'{}'); } catch(e){ return {}; } }
 function saveAch(a){ try { localStorage.setItem('spw_ach', JSON.stringify(a)); } catch(e){} }
@@ -2523,9 +2531,11 @@ function unlockAch(id){
 }
 function achPop(def){
   const box = $('achToasts');
+  const r = RARITY[def.r] || RARITY[0];
   const el = document.createElement('div');
   el.className = 'achPop';
-  el.innerHTML = `<div class="ai2">${def.icon}</div><div><div class="an">🏆 成就解锁：${def.name}</div><div class="aq">${def.quote}</div></div>`;
+  el.style.borderColor = r.color;
+  el.innerHTML = `<div class="ai2">${def.icon}</div><div><div class="an" style="color:${r.color}">🏆 ${r.name}成就：${def.name}</div><div class="aq">${def.quote}</div></div>`;
   box.appendChild(el);
   sfx('win');   // 借用胜利音效做解锁提示
   setTimeout(()=>{ el.style.transition='opacity .5s'; el.style.opacity=0; setTimeout(()=>el.remove(), 500); }, 3200);
@@ -2541,9 +2551,11 @@ function showAchWall(){
   const a = getAch();
   $('achGrid').innerHTML = ACHIEVEMENTS.map(d => {
     const un = !!a[d.id];
-    return `<div class="achCell${un?'':' lock'}">
+    const r = RARITY[d.r];
+    return `<div class="achCell${un?'':' lock'}" style="border:1px solid ${r.color}66">
       <div class="ai2">${un ? d.icon : '❓'}</div>
       <div class="an">${d.name}</div>
+      <div class="ar" style="color:${r.color}">${'★'.repeat(d.r+1)} ${r.name}</div>
       <div class="ac">${un ? d.quote : d.cond}</div>
     </div>`;
   }).join('');
