@@ -796,8 +796,8 @@ function initGame() {
   gameId++;   // 新一局：作废旧局所有挂起协程
   gameItems = { got:{}, used:{} };   // 新一局：重置本局道具统计
   difficulty = CONFIG.difficulty;   // 以配置界面的难度为准
-  // 联机先后手：主机决定（随机 / 轮换 / 主机先手），单机和客人固定本地先手视角
-  let iFirst = true;
+  // 先后手：人机随机；联机由主机按配置决定（随机 / 轮换 / 主机先手），客人以主机同步为准
+  let iFirst = Math.random() < 0.5;
   if (NET.on && NET.isHost) {
     if (CONFIG.firstMove === 'random') iFirst = Math.random() < 0.5;
     else if (CONFIG.firstMove === 'alternate') iFirst = localStorage.getItem('spw_first_last') !== 'me';
@@ -865,10 +865,12 @@ function initGame() {
   log('sys', `🛡 后手补偿：${secondSide==='player' ? '你的' : SIDE_NAME.ai + '的'}一名士兵开局自带护盾（可抵挡一次炮击）`);
   if (iFirst) {
     beginPlayerTurn(true);
-  } else {
+  } else if (NET.on) {
     // 联机后手：锁定操作，把初始状态发给对方，等对方先行动
     S.turn = 'ai'; S.busy = true;
     netSync();
+  } else {
+    aiTurn(true);   // 人机后手：电脑先行动（先手方首回合出牌数 -1 对电脑同样生效）
   }
   render();
 }
@@ -1711,10 +1713,44 @@ function startTurn(side, first=false){
 }
 
 /* ================= 电脑 AI ================= */
-async function aiTurn(){
+/* 困难 AI 即时道具：回合中新拾取的免费防御道具（护盾/增援）立即使用，不囤到下回合 */
+async function aiAutoUseFreebies(){
+  if (difficulty !== 'hard') return;
+  const gid = gameId;
+  // 护盾：立刻套给最受威胁的无盾士兵
+  const si = S.items.ai.indexOf('shield');
+  if (si >= 0) {
+    const cand = S.cells.filter(c => c.soldier==='ai' && !c.shield);
+    if (cand.length) {
+      S.items.ai.splice(si,1);
+      const target = mostThreatened(cand);
+      target.shield = true;
+      log('ai', `🧠 电脑捡到护盾，立刻给 (${target.r+1},${target.c+1}) 的士兵套上`);
+      render(); await sleep(500);
+      if (gid!==gameId) return;
+    }
+  }
+  // 增援：立刻补充兵力（满编时不浪费，留到减员再用）
+  const ri = S.items.ai.indexOf('reinforce');
+  if (ri >= 0 && countSoldiers('ai') < CONFIG.soldiers) {
+    S.items.ai.splice(ri,1);
+    const idx = doReinforce('ai');
+    log('ai', '🧠 电脑捡到增援，立刻呼叫补充 1 名士兵');
+    render();
+    if (typeof idx === 'number') playSummonFx([idx]);
+    await sleep(typeof idx === 'number' ? 1200 : 500);
+    if (gid!==gameId) return;
+  }
+}
+
+async function aiTurn(first=false){
   if (S.turn === 'ai' || S.over) return;   // 防重入：AI 回合不得并发启动第二次
   const gid = gameId;   // 本局代际：每次 await 醒来后比对，换代立即退出
   startTurn('ai');
+  if (first) {   // 先手平衡：首回合出牌数 -1（与玩家规则一致）
+    S.needPlay = Math.max(1, CONFIG.plays - 1);
+    log('sys', `⚖️ 先后手平衡：先手方首回合只能打出 ${S.needPlay} 张牌`);
+  }
   S.busy = true; render();
   await sleep(400);
   if (gid!==gameId) return;
@@ -1876,6 +1912,8 @@ async function aiTurn(){
     await playCardAI(move.cardIdx, move.targetIdx);
     if (gid!==gameId) return;   // 已换代：退出
     if (checkOver()) return;   // 最后一张牌击杀也要结算胜负
+    await aiAutoUseFreebies();   // 困难 AI：本炮捡到的护盾/增援立即使用
+    if (gid!==gameId) return;
   }
   if (checkOver()) return;     // 循环结束后再兜底检查一次
 
@@ -2691,8 +2729,8 @@ function renderStatsPanel(){
       <span>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span></div>`;
   }).join('');
 
-  // 先后手胜率（仅联机有先后手差异；人机玩家固定先手，统计无意义）
-  const netGames = st.recent.filter(r => r.mode === 'net' && r.first !== undefined);
+  // 先后手胜率（人机与联机均随机先后手，全部场次纳入统计）
+  const netGames = st.recent.filter(r => r.first !== undefined);
   let firstLine = '';
   if (netGames.length) {
     const calc = arr => {
@@ -2700,7 +2738,7 @@ function renderStatsPanel(){
       return arr.length ? `${w}胜${arr.length - w}负（${Math.round(100*w/arr.length)}%）` : '—';
     };
     firstLine = `<div style="color:#8fa0b3;font-size:12px;margin-top:4px">
-      🎲 联机先后手：先手 ${calc(netGames.filter(r=>r.first))} ｜ 后手 ${calc(netGames.filter(r=>!r.first))}</div>`;
+      🎲 先后手：先手 ${calc(netGames.filter(r=>r.first))} ｜ 后手 ${calc(netGames.filter(r=>!r.first))}</div>`;
   }
 
   $('statsBody').innerHTML = `
