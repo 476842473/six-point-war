@@ -597,7 +597,7 @@
     ・弃牌换牌：每回合 1 次，弃 2 张抽 1 张（重抽必与弃牌点数不同）；选 3 张相同点数的牌可触发三连兑换，换 1 张任意点数的牌<br>
     ・<b>无空地结算</b>：地图被占满（无可用空地）时，立即按剩余士兵数定胜负，相等为平局<br>
     ・结束回合：可随时提前结束，轮到电脑<br>
-    ・后手补偿：电脑开局 1 名士兵自带护盾<br>
+    ・先后手平衡：<b>先手方首回合出牌数 -1</b>（至少 1 次）；后手方开局 1 名士兵自带护盾<br>
     ・难度：简单=乱打 ｜ 普通=标准 ｜ 困难=记牌+精准护盾+零误伤<br>
     <br><button onclick="document.getElementById('rules').classList.remove('show')">关闭</button>
   </div></div>
@@ -811,6 +811,7 @@ function initGame() {
     hand: { player:[], ai:[] },
     items: { player:[], ai:[] },
     turn:'player', played:0, needPlay:2,
+    firstMove: iFirst,              // 本地玩家是否先手（先后手胜率统计用；联机随 swapState 翻转）
     selCard:null, selItem:null,
     guidedNext:{player:false, ai:false},
     chainNext:{player:false, ai:false},
@@ -1671,6 +1672,10 @@ async function diceAndDraw(side){
 async function beginPlayerTurn(first=false){
   const gid = gameId;
   startTurn('player', first);
+  if (first) {   // 先手平衡：首回合出牌数 -1（至少 1 次），削首轮节奏优势
+    S.needPlay = Math.max(1, CONFIG.plays - 1);
+    log('sys', `⚖️ 先后手平衡：先手方首回合只能打出 ${S.needPlay} 张牌`);
+  }
   S.stats.rounds++;
   await diceAndDraw('player');
   if (S.over || gid!==gameId) return;   // 结束或已换代：退出
@@ -2124,6 +2129,7 @@ function swapState(src){
   ['kills','items','rares','shieldBlocks','minMe'].forEach(k => { const t = c.stats[k]; [t.player, t.ai] = [t.ai, t.player]; });   // 均为 {player,ai} 结构，随视角翻转
   c.cells.forEach(cell => { if (cell.soldier) cell.soldier = cell.soldier==='player' ? 'ai' : 'player'; });
   c.turn = c.turn==='player' ? 'ai' : 'player';
+  c.firstMove = !c.firstMove;   // 先手标记随视角翻转
   // 瞬态/选择态不继承
   c.selCard = c.selItem = c.rareOpen = null;
   c.rareSel = []; c.discardSel = []; c.discardMode = false;
@@ -2651,7 +2657,8 @@ function recordMatch(win, draw){
     });
   });
   st.recent.unshift({ ts:Date.now(), mode: NET.on?'net':'ai', diff:difficulty,
-                      result: draw?'draw':(win?'win':'lose'), kills, rounds, durMs });
+                      result: draw?'draw':(win?'win':'lose'), kills, rounds, durMs,
+                      first: !!S.firstMove });   // 本地玩家是否先手（先后手胜率统计）
   if (st.recent.length > 20) st.recent.length = 20;
   saveStats(st);
 }
@@ -2684,10 +2691,22 @@ function renderStatsPanel(){
       <span>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span></div>`;
   }).join('');
 
+  // 先后手胜率（仅联机有先后手差异；人机玩家固定先手，统计无意义）
+  const netGames = st.recent.filter(r => r.mode === 'net' && r.first !== undefined);
+  let firstLine = '';
+  if (netGames.length) {
+    const calc = arr => {
+      const w = arr.filter(r => r.result === 'win').length;
+      return arr.length ? `${w}胜${arr.length - w}负（${Math.round(100*w/arr.length)}%）` : '—';
+    };
+    firstLine = `<div style="color:#8fa0b3;font-size:12px;margin-top:4px">
+      🎲 联机先后手：先手 ${calc(netGames.filter(r=>r.first))} ｜ 后手 ${calc(netGames.filter(r=>!r.first))}</div>`;
+  }
+
   $('statsBody').innerHTML = `
     <h4>总览</h4>
     <div class="stScroll"><table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
-      ${row('全部', st.total)}</table></div>
+      ${row('全部', st.total)}</table></div>${firstLine}
     <h4>分模式</h4>
     <div class="stScroll"><table><tr><th></th><th>场次</th><th>战绩</th><th>胜率</th><th>场均回合</th><th>场均时长</th></tr>
       ${row('人机 · 简单', st.vsAi.easy)}
